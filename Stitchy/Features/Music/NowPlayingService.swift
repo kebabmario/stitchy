@@ -23,10 +23,15 @@ final class NowPlayingService: NSObject {
         var notification: Notification.Name {
             Notification.Name(self == .music ? "com.apple.Music.playerInfo" : "com.spotify.client.PlaybackStateChanged")
         }
-        var icon: NSImage? {
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: rawValue)
+        /// Cached: looked up once per player, not on every render.
+        @MainActor var icon: NSImage? {
+            if let cached = Self.icons[self] { return cached }
+            let image = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rawValue)
                 .map { NSWorkspace.shared.icon(forFile: $0.path) }
+            Self.icons[self] = image
+            return image
         }
+        @MainActor private static var icons: [Player: NSImage] = [:]
         var isRunning: Bool {
             !NSRunningApplication.runningApplications(withBundleIdentifier: rawValue).isEmpty
         }

@@ -121,71 +121,43 @@ struct Tile<Content: View>: View {
     }
 }
 
-/// Music visualizer bars, animated by Core Animation on the render server
-/// so a playing track costs ~0% CPU in Stitchy itself.
-struct EqualizerView: NSViewRepresentable {
+/// Music visualizer bars.
+///
+/// Measured on macOS 26: Core Animation animations in a hosted NSView kept
+/// the whole island re-laying out every frame (2–20 % CPU). This version is
+/// a SwiftUI TimelineView that steps ~6 times a second and only invalidates
+/// itself, so a playing track costs well under 1 % CPU.
+struct EqualizerView: View {
     var color: NSColor
     var animating: Bool
+    private static let rest: [Double] = [0.45, 0.8, 0.35, 0.6]
 
-    func makeNSView(context: Context) -> EqualizerNSView { EqualizerNSView() }
+    var body: some View {
+        TimelineView(.periodic(from: .timelineAnchor, by: animating ? 1.0 / 6 : 3600)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate * 6
+            HStack(alignment: .center, spacing: 0) {
+                ForEach(0..<4, id: \.self) { i in
+                    let level = animating ? Self.level(i, t) : Self.rest[i]
+                    if i > 0 { Spacer(minLength: 0) }
+                    Capsule().fill(Color(nsColor: color)).frame(width: 2.6).frame(maxHeight: .infinity).scaleEffect(y: level)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
 
-    func updateNSView(_ view: EqualizerNSView, context: Context) {
-        view.update(color: color, animating: animating)
+    /// Smooth-looking pseudo-random levels from overlapping sines.
+    private static func level(_ i: Int, _ t: Double) -> Double {
+        let d = Double(i)
+        let v = 0.55 + 0.3 * sin(t * (0.9 + d * 0.37)) + 0.15 * sin(t * (2.1 + d * 0.53))
+        return min(max(v, 0.2), 1)
     }
 }
 
-final class EqualizerNSView: NSView {
-    private let bars: [CALayer] = (0..<4).map { _ in CALayer() }
-    private var isAnimating = false
-    private let durations: [CFTimeInterval] = [0.46, 0.58, 0.38, 0.52]
-    private let restScale: [CGFloat] = [0.45, 0.8, 0.35, 0.6]
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        for (i, bar) in bars.enumerated() {
-            bar.transform = CATransform3DMakeScale(1, restScale[i], 1)
-            layer?.addSublayer(bar)
-        }
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        let width: CGFloat = 2.6
-        let gap = (bounds.width - width * CGFloat(bars.count)) / CGFloat(bars.count - 1)
-        for (i, bar) in bars.enumerated() {
-            bar.bounds = CGRect(x: 0, y: 0, width: width, height: bounds.height)
-            bar.position = CGPoint(x: CGFloat(i) * (width + gap) + width / 2, y: bounds.midY)
-            bar.cornerRadius = width / 2
-        }
-        CATransaction.commit()
-    }
-
-    func update(color: NSColor, animating: Bool) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        bars.forEach { $0.backgroundColor = color.cgColor }
-        CATransaction.commit()
-        guard animating != isAnimating else { return }
-        isAnimating = animating
-        for (i, bar) in bars.enumerated() {
-            bar.removeAllAnimations()
-            guard animating else { continue }
-            let anim = CABasicAnimation(keyPath: "transform.scale.y")
-            anim.fromValue = 0.25
-            anim.toValue = 1.0
-            anim.duration = durations[i]
-            anim.autoreverses = true
-            anim.repeatCount = .infinity
-            anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            anim.beginTime = CACurrentMediaTime() + Double(i) * 0.09
-            bar.add(anim, forKey: "eq")
-        }
-    }
+extension Date {
+    /// Fixed start for periodic TimelineViews. Using `.now` re-anchors the
+    /// schedule on every render, which makes it tick every frame.
+    static let timelineAnchor = Date(timeIntervalSinceReferenceDate: 0)
 }
 
 extension Color {

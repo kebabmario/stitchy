@@ -43,7 +43,7 @@ struct MusicView: View {
 
     @ViewBuilder private func progress(_ track: NowPlayingService.Track) -> some View {
         if let duration = track.duration, duration > 0, music.position != nil {
-            TimelineView(.periodic(from: .now, by: music.isPlaying ? 1 : 3600)) { context in
+            TimelineView(.periodic(from: .timelineAnchor, by: music.isPlaying ? 1 : 3600)) { context in
                 let elapsed = music.elapsed(at: context.date) ?? 0
                 VStack(spacing: 3) {
                     GeometryReader { geo in

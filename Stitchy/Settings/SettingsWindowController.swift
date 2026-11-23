@@ -5,26 +5,27 @@ import SwiftUI
 /// page a SwiftUI grouped Form.
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    private let services: AppServices
+
     init(services: AppServices) {
+        self.services = services
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
         func page(_ title: String, _ symbol: String, height: CGFloat, _ view: some View) {
-            let host = NSHostingController(rootView: view
-                .environment(services.settings)
-                .environment(services.nowPlaying)
-                .environment(services.notifier)
-                .environment(services.downloads)
-                .frame(width: 500, height: height))
+            let host = NSHostingController(rootView: view.stitchyEnvironment(services).frame(width: 540, height: height))
             host.sizingOptions = [.preferredContentSize]
             let item = NSTabViewItem(viewController: host)
             item.label = title
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
             tabs.addTabViewItem(item)
         }
-        page("General", "gearshape", height: 330, GeneralSettingsView())
-        page("Island", "capsule", height: 560, IslandSettingsView())
-        page("Features", "square.grid.2x2", height: 500, FeaturesSettingsView())
-        page("Permissions", "hand.raised", height: 430, PermissionsSettingsView())
+        page("General", "gearshape", height: 400, GeneralSettingsView())
+        page("Island", "rectangle.topthird.inset.filled", height: 640, IslandSettingsView())
+        page("Features", "square.grid.2x2", height: 640, FeaturesSettingsView())
+        page("Clipboard", "doc.on.clipboard", height: 520, ClipboardSettingsView())
+        page("Launcher", "magnifyingglass", height: 460, LauncherSettingsView())
+        page("Face ID", "faceid", height: 620, FaceIDSettingsView())
+        page("Privacy", "hand.raised", height: 560, PrivacySettingsView())
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
@@ -40,5 +41,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Closing Settings never leaves the camera running.
+    func windowWillClose(_ notification: Notification) {
+        if services.faceID.cameraRunning { services.faceID.stopCamera() }
     }
 }

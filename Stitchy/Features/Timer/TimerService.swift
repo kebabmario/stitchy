@@ -15,6 +15,8 @@ final class TimerService {
         case finished
     }
 
+    let id = UUID()
+    var label: String
     private(set) var phase: Phase = .idle
     /// Length of the countdown that is running or about to start.
     private(set) var total: TimeInterval
@@ -26,13 +28,19 @@ final class TimerService {
     @ObservationIgnored private var completion: Task<Void, Never>?
     /// Holds off App Nap only while a countdown runs, so it ends on time.
     @ObservationIgnored private var activity: NSObjectProtocol?
-    private static let notificationID = "stitchy.timer"
+    private var notificationID: String { "stitchy.timer.\(id.uuidString)" }
+    /// Title used for alerts and notifications.
+    @ObservationIgnored var completionTitle = "Timer Done"
+    /// Called after completion (Pomodoro uses it to advance phases).
+    @ObservationIgnored var onFinish: (() -> Void)?
 
-    init(settings: AppSettings?, notifier: SystemNotifier?, now: @escaping () -> Date = Date.init) {
+    init(settings: AppSettings?, notifier: SystemNotifier?, label: String = "Timer",
+         duration: TimeInterval? = nil, now: @escaping () -> Date = Date.init) {
         self.settings = settings
         self.notifier = notifier
         self.now = now
-        total = settings?.timerDuration ?? 300
+        self.label = label
+        total = duration ?? settings?.timerDuration ?? 300
     }
 
     var isActive: Bool { phase != .idle }
@@ -64,7 +72,6 @@ final class TimerService {
     func setDuration(_ seconds: TimeInterval) {
         guard phase == .idle || phase == .finished else { return }
         total = min(max(seconds, 60), 12 * 3600)
-        settings?.timerDuration = total
         phase = .idle
     }
 
@@ -107,8 +114,8 @@ final class TimerService {
                 // Re-check: the timer may have been paused while the prompt was up.
                 guard case .running = self.phase else { return }
                 notifier.schedule(
-                    id: Self.notificationID, title: "Timer Done",
-                    body: "Your \(Self.describe(total)) timer has finished.", after: remaining()
+                    id: self.notificationID, title: self.completionTitle,
+                    body: "\(self.label) · \(Self.describe(self.total)) finished.", after: self.remaining()
                 )
             }
         }
@@ -122,10 +129,11 @@ final class TimerService {
         endActivity()
         islandLog.info("timer finished")
         onEvent?(ActivityEvent(
-            symbol: "timer", tint: .orange, title: "Timer Done",
-            detail: "\(Self.describe(total)) timer finished", trailing: "0:00",
+            symbol: "timer", tint: .orange, title: completionTitle,
+            detail: "\(label) · \(Self.describe(total))", trailing: "0:00",
             tab: .timer, alertDuration: 8
         ))
+        onFinish?()
     }
 
     private func endActivity() {
@@ -137,7 +145,7 @@ final class TimerService {
         completion?.cancel()
         completion = nil
         endActivity()
-        notifier?.cancel(id: Self.notificationID)
+        notifier?.cancel(id: notificationID)
     }
 
     static func describe(_ seconds: TimeInterval) -> String {

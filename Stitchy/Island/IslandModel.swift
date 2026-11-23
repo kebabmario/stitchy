@@ -3,7 +3,7 @@ import Observation
 import SwiftUI
 
 enum IslandTab: String, CaseIterable, Identifiable, Sendable {
-    case home, music, timer, shelf, activity
+    case home, music, timer, shelf, notes, calendar, launcher, activity
 
     var id: String { rawValue }
 
@@ -11,8 +11,11 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .home: "Home"
         case .music: "Music"
-        case .timer: "Timer"
+        case .timer: "Timers"
         case .shelf: "Shelf"
+        case .notes: "Notes"
+        case .calendar: "Calendar"
+        case .launcher: "Launcher"
         case .activity: "Activity"
         }
     }
@@ -23,6 +26,9 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
         case .music: "music.note"
         case .timer: "timer"
         case .shelf: "tray.full.fill"
+        case .notes: "note.text"
+        case .calendar: "calendar"
+        case .launcher: "magnifyingglass"
         case .activity: "bell.fill"
         }
     }
@@ -30,48 +36,83 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
     /// Height of the tab's content area. The island animates between these.
     var contentHeight: CGFloat {
         switch self {
-        case .home: 150
-        case .music: 132
-        case .timer: 132
-        case .shelf: 132
-        case .activity: 176
+        case .home: 168
+        case .music: 136
+        case .timer: 176
+        case .shelf: 156
+        case .notes: 176
+        case .calendar: 168
+        case .launcher: 176
+        case .activity: 188
         }
     }
 }
 
-/// Geometry of the island. All values in points.
-enum IslandMetrics {
-    static let compact = CGSize(width: 132, height: 36)
-    static let compactHover = CGSize(width: 142, height: 38)
-    static let compactLive = CGSize(width: 224, height: 36)
-    static let alert = CGSize(width: 330, height: 52)
-    static let expandedWidth: CGFloat = 430
+/// Geometry of the attached notch. All values in points.
+///
+/// The island hangs from the top edge of the display like a MacBook notch:
+/// square top edge with small concave "shoulders" that blend into the
+/// screen edge, and rounded bottom corners. Resting width/height come from
+/// Settings; the height defaults to the menu bar height so it reads as a
+/// real notch.
+struct IslandGeometry: Equatable {
+    var notchWidth: CGFloat
+    var notchHeight: CGFloat
+    var expandedWidth: CGFloat
+
     static let headerHeight: CGFloat = 28
-    static let expandedPadding = EdgeInsets(top: 10, leading: 18, bottom: 16, trailing: 18)
     static let headerSpacing: CGFloat = 10
+    /// Concave shoulder radius where the island meets the top edge.
+    static let shoulder: CGFloat = 8
+    static let expandedShoulder: CGFloat = 14
+    static let bottomPadding: CGFloat = 18
 
     /// The panel is a fixed transparent canvas big enough for the largest
     /// state plus its shadow; only the island itself receives mouse events.
-    static let panel = CGSize(width: 560, height: 320)
+    static let panel = CGSize(width: 680, height: 380)
 
-    static func expandedHeight(for tab: IslandTab) -> CGFloat {
-        expandedPadding.top + headerHeight + headerSpacing + tab.contentHeight + expandedPadding.bottom
+    var compact: CGSize { CGSize(width: notchWidth + 2 * Self.shoulder, height: notchHeight) }
+    var compactHover: CGSize { CGSize(width: compact.width + 12, height: notchHeight + 4) }
+    /// Live activities sit on both sides of the notch, like the Dynamic Island.
+    var compactLive: CGSize { CGSize(width: compact.width + 128, height: notchHeight) }
+    var alert: CGSize { CGSize(width: max(compact.width + 170, 360), height: notchHeight + 30) }
+    var hud: CGSize { CGSize(width: compact.width + 150, height: notchHeight) }
+
+    var expandedTopPadding: CGFloat { max(6, (notchHeight - Self.headerHeight) / 2) }
+
+    func expandedHeight(for tab: IslandTab) -> CGFloat {
+        expandedTopPadding + Self.headerHeight + Self.headerSpacing + tab.contentHeight + Self.bottomPadding
     }
 
-    /// Target size of the island for a given state. Shared by the view
-    /// (what it draws) and the window controller (where it accepts the
-    /// pointer), so hit-testing never depends on mid-animation layout.
-    static func size(expanded: Bool, tab: IslandTab, hasAlert: Bool, activity: LiveActivity, hovering: Bool) -> CGSize {
-        if expanded { return CGSize(width: expandedWidth, height: expandedHeight(for: tab)) }
-        if hasAlert { return alert }
-        if activity != .none { return compactLive }
-        return hovering ? compactHover : compact
+    func expanded(for tab: IslandTab) -> CGSize {
+        CGSize(width: expandedWidth + 2 * Self.expandedShoulder, height: expandedHeight(for: tab))
     }
 
-    static let expandedRadii = RectangleCornerRadii(topLeading: 24, bottomLeading: 36, bottomTrailing: 36, topTrailing: 24)
+    enum Mode: Equatable { case compact, hover, live, alert, hud, expanded }
+
+    func size(_ mode: Mode, tab: IslandTab) -> CGSize {
+        switch mode {
+        case .compact: compact
+        case .hover: compactHover
+        case .live: compactLive
+        case .alert: alert
+        case .hud: hud
+        case .expanded: expanded(for: tab)
+        }
+    }
+
+    func shoulder(_ mode: Mode) -> CGFloat { mode == .expanded ? Self.expandedShoulder : Self.shoulder }
+
+    func bottomRadius(_ mode: Mode) -> CGFloat {
+        switch mode {
+        case .expanded: 34
+        case .alert: 22
+        default: min(notchHeight * 0.42, 14)
+        }
+    }
 }
 
-/// UI state of the island: compact, showing a live alert, or expanded.
+/// UI state of the island: compact, showing a live alert or HUD, or expanded.
 @MainActor @Observable
 final class IslandModel {
     enum Source { case hover, click, drag, menu }
@@ -80,9 +121,14 @@ final class IslandModel {
     private(set) var source: Source = .hover
     private(set) var tab: IslandTab = .home
     private(set) var alert: ActivityEvent?
+    private(set) var hud: HUDEvent?
     var isHovering = false
     var isFileDragActive = false
     var isDropTargeted = false
+    /// Height of the menu bar on the island's screen; the default notch height.
+    var menuBarHeight: CGFloat = 32
+    /// Incremented to ask the launcher to focus its search field.
+    var focusSearchToken = 0
 
     /// Set when a mouse-down pins a hover-opened island, so the same click's
     /// mouse-up on the header doesn't immediately close it again.
@@ -91,9 +137,23 @@ final class IslandModel {
     @ObservationIgnored var onExpansionChange: ((Bool, Source) -> Void)?
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private var alertTask: Task<Void, Never>?
+    @ObservationIgnored private var hudTask: Task<Void, Never>?
 
     init(settings: AppSettings) {
         self.settings = settings
+    }
+
+    var geometry: IslandGeometry {
+        let h = settings.notchHeight > 0 ? settings.notchHeight : max(menuBarHeight, 24)
+        return IslandGeometry(notchWidth: settings.notchWidth, notchHeight: h, expandedWidth: settings.expandedWidth)
+    }
+
+    func mode(hasLiveActivity: Bool) -> IslandGeometry.Mode {
+        if isExpanded { return .expanded }
+        if alert != nil { return .alert }
+        if hud != nil { return .hud }
+        if hasLiveActivity { return .live }
+        return isHovering ? .hover : .compact
     }
 
     func expand(_ source: Source, tab: IslandTab? = nil) {
@@ -110,9 +170,11 @@ final class IslandModel {
         self.source = source
         islandLog.info("expand source=\(String(describing: source), privacy: .public) tab=\(self.tab.rawValue, privacy: .public)")
         alertTask?.cancel()
+        hudTask?.cancel()
         withAnimation(settings.expandAnimation) {
             isExpanded = true
             alert = nil
+            hud = nil
         }
         onExpansionChange?(true, source)
     }
@@ -140,6 +202,12 @@ final class IslandModel {
         } else {
             self.tab = tab
         }
+    }
+
+    /// Opens the launcher pinned, with its search field focused.
+    func openLauncher() {
+        expand(.menu, tab: .launcher)
+        focusSearchToken += 1
     }
 
     /// Click on empty header space: closes a pinned island (click-to-toggle).
@@ -178,8 +246,35 @@ final class IslandModel {
         withAnimation(settings.collapseAnimation) { self.alert = nil }
     }
 
+    /// Shows a compact system indicator (volume, mute, output).
+    /// Repeated changes update it in place and extend its lifetime.
+    func showHUD(_ event: HUDEvent) {
+        guard !isExpanded, alert == nil else { return }
+        islandLog.info("hud \(event.title, privacy: .public) level=\(event.level ?? -1, privacy: .public)")
+        hudTask?.cancel()
+        if hud == nil {
+            withAnimation(settings.expandAnimation) { hud = event }
+        } else {
+            hud = event
+        }
+        hudTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled, let self else { return }
+            withAnimation(self.settings.collapseAnimation) { self.hud = nil }
+        }
+    }
+
     func setHovering(_ hovering: Bool) {
         guard hovering != isHovering else { return }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { isHovering = hovering }
     }
+}
+
+/// A compact system indicator.
+struct HUDEvent: Equatable {
+    var symbol: String
+    var tint: Color = .white
+    var title: String
+    /// 0...1 level bar, or nil for a text-only indicator.
+    var level: Double?
 }

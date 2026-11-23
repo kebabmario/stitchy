@@ -12,78 +12,66 @@ struct IslandRootView: View {
     }
 }
 
-/// The single black shape that morphs between compact, alert and expanded.
+/// The single black notch that morphs between compact, live activity,
+/// alert, HUD and expanded.
 ///
-/// One view owns one shape whose size and corner radii animate; content is
-/// swapped inside it and clipped by it. That is what makes the three states
-/// read as the same physical object growing downward from the top edge.
+/// One view owns one `NotchShape` whose size and radii animate; content is
+/// swapped inside it and clipped by it. Its top edge never moves, so every
+/// state reads as the same surface growing down from the display edge.
 struct IslandView: View {
     @Environment(IslandModel.self) private var model
-    @Environment(AppSettings.self) private var settings
-    @Environment(TimerService.self) private var timer
-    @Environment(NowPlayingService.self) private var nowPlaying
-    @Environment(DownloadsMonitor.self) private var downloads
+    @Environment(AppServices.self) private var services
 
     var body: some View {
-        let activity = liveActivity
-        let size = size(for: activity)
-        let shape = UnevenRoundedRectangle(cornerRadii: radii(for: size), style: .continuous)
+        let activities = services.compactActivities
+        let mode = model.mode(hasLiveActivity: !activities.isEmpty)
+        let geometry = model.geometry
+        let size = geometry.size(mode, tab: model.tab)
+        let shape = NotchShape(shoulder: geometry.shoulder(mode), bottomRadius: geometry.bottomRadius(mode))
+        let inset = geometry.shoulder(mode)
 
         ZStack(alignment: .top) {
-            if model.isExpanded {
+            switch mode {
+            case .expanded:
                 ExpandedIslandView()
+                    .padding(.horizontal, inset)
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
-                            .animation(.easeOut(duration: 0.24).delay(0.05)),
+                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                            .animation(.easeOut(duration: 0.24).delay(0.06)),
                         removal: .opacity.animation(.easeIn(duration: 0.1))
                     ))
-            } else if let alert = model.alert {
-                AlertIslandView(event: alert)
-                    .id(alert.id)
-                    .transition(.blurReplace.animation(.easeOut(duration: 0.22)))
-            } else {
-                CompactIslandView(activity: activity)
+            case .alert:
+                if let alert = model.alert {
+                    AlertIslandView(event: alert)
+                        .padding(.horizontal, inset)
+                        .id(alert.id)
+                        .transition(.blurReplace.animation(.easeOut(duration: 0.22)))
+                }
+            case .hud:
+                if let hud = model.hud {
+                    HUDIslandView(event: hud, notchWidth: geometry.notchWidth)
+                        .padding(.horizontal, inset)
+                        .transition(.blurReplace.animation(.easeOut(duration: 0.18)))
+                }
+            case .live:
+                CompactIslandView(activities: activities, notchWidth: geometry.notchWidth)
+                    .padding(.horizontal, inset)
                     .transition(.blurReplace.animation(.easeOut(duration: 0.2)))
+            case .compact, .hover:
+                Color.clear
             }
         }
         .frame(width: size.width, height: size.height, alignment: .top)
         .background(.black)
         .clipShape(shape)
         .contentShape(shape)
-        .shadow(color: .black.opacity(model.isExpanded ? 0.4 : 0), radius: 16, y: 6)
+        // No shadow layer at all unless expanded: a zero-opacity shadow still
+        // forces an offscreen pass on every repaint of the compact island.
+        .shadow(color: .black.opacity(mode == .expanded ? 0.45 : 0), radius: mode == .expanded ? 18 : 0, y: mode == .expanded ? 8 : 0)
         .onTapGesture {
             if !model.isExpanded { model.handleCompactClick() }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Stitchy")
-    }
-
-    private var liveActivity: LiveActivity {
-        LiveActivity.resolve(settings: settings, timer: timer, downloads: downloads, nowPlaying: nowPlaying)
-    }
-
-    private func size(for activity: LiveActivity) -> CGSize {
-        IslandMetrics.size(expanded: model.isExpanded, tab: model.tab, hasAlert: model.alert != nil,
-                           activity: activity, hovering: model.isHovering)
-    }
-
-    private func radii(for size: CGSize) -> RectangleCornerRadii {
-        if model.isExpanded { return IslandMetrics.expandedRadii }
-        let r = size.height / 2
-        return RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r)
-    }
-}
-
-/// What the compact island shows on its leading/trailing sides.
-enum LiveActivity: Equatable {
-    case none, timer, download, music
-
-    @MainActor
-    static func resolve(settings: AppSettings, timer: TimerService, downloads: DownloadsMonitor, nowPlaying: NowPlayingService) -> LiveActivity {
-        guard settings.compactActivities else { return .none }
-        if settings.timerEnabled, timer.isActive { return .timer }
-        if settings.downloadsEnabled, !downloads.active.isEmpty { return .download }
-        if settings.musicEnabled, nowPlaying.isPlaying { return .music }
-        return .none
     }
 }

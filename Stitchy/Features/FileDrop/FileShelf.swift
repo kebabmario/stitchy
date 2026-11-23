@@ -1,5 +1,7 @@
 import AppKit
 import Observation
+import QuickLookThumbnailing
+import UniformTypeIdentifiers
 
 /// Temporary holding area for dropped files (inspired by Droppy).
 ///
@@ -7,17 +9,26 @@ import Observation
 /// the shelf never touches the file on disk; nothing is ever moved, copied
 /// or deleted unless the user drags it somewhere themselves.
 @MainActor @Observable
-final class FileShelf {
+final class FileShelf: NSObject, NSSharingServiceDelegate {
     struct Item: Identifiable, Hashable {
         let id = UUID()
         let url: URL
         /// Finder display name ("Calculator", not "Calculator.app").
         var name: String { FileManager.default.displayName(atPath: url.path) }
+        /// Human-readable type ("PDF document", "Folder").
+        var kind: String {
+            (try? url.resourceValues(forKeys: [.localizedTypeDescriptionKey]))?.localizedTypeDescription ?? ""
+        }
     }
 
     private(set) var items: [Item] = []
     @ObservationIgnored var onAdd: ((Int) -> Void)?
     @ObservationIgnored private var icons: [URL: NSImage] = [:]
+    /// QuickLook thumbnails, generated asynchronously when previews are on.
+    private(set) var thumbnails: [URL: NSImage] = [:]
+    /// Outgoing AirDrop: macOS reports start and finish, not byte progress.
+    private(set) var airDropInProgress: Int?
+    @ObservationIgnored var onTransferEvent: ((ActivityEvent) -> Void)?
 
     /// Adds existing file URLs, skipping duplicates. Returns how many were added.
     @discardableResult
@@ -43,16 +54,31 @@ final class FileShelf {
     func remove(_ item: Item) {
         items.removeAll { $0.id == item.id }
         icons[item.url] = nil
+        thumbnails[item.url] = nil
     }
 
     /// Empties the shelf. Files on disk are untouched.
     func clear() {
         items.removeAll()
         icons.removeAll()
+        thumbnails.removeAll()
     }
 
     func exists(_ item: Item) -> Bool {
         FileManager.default.fileExists(atPath: item.url.path)
+    }
+
+    func thumbnail(for item: Item, size: CGFloat) -> NSImage? {
+        if let image = thumbnails[item.url] { return image }
+        let url = item.url
+        let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: size, height: size),
+                                                   scale: NSScreen.main?.backingScaleFactor ?? 2, representationTypes: .thumbnail)
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in
+            guard let cg = rep?.cgImage else { return }
+            let image = NSImage(cgImage: cg, size: .zero)
+            Task { @MainActor [weak self] in self?.thumbnails[url] = image }
+        }
+        return nil
     }
 
     func icon(for item: Item) -> NSImage {
@@ -75,6 +101,24 @@ final class FileShelf {
     func airDrop(_ selection: [Item]? = nil) {
         let urls = (selection ?? items).map(\.url)
         guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop) else { return }
+        service.delegate = self
         service.perform(withItems: urls)
+    }
+
+    func sharingService(_ sharingService: NSSharingService, willShareItems items: [Any]) {
+        airDropInProgress = items.count
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
+        airDropInProgress = nil
+        onTransferEvent?(ActivityEvent(symbol: "airplayaudio", tint: .blue, title: "AirDrop Sent",
+                                       detail: items.count == 1 ? "1 item" : "\(items.count) items", tab: .shelf))
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didFailToShareItems items: [Any], error: Error) {
+        airDropInProgress = nil
+        let cancelled = (error as NSError).code == NSUserCancelledError
+        onTransferEvent?(ActivityEvent(symbol: "airplayaudio", tint: .gray, title: cancelled ? "AirDrop Cancelled" : "AirDrop Failed",
+                                       detail: cancelled ? nil : error.localizedDescription, tab: .shelf, showsAlert: !cancelled))
     }
 }

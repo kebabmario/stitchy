@@ -34,6 +34,12 @@
 	<false/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Stitchy uses Apple Events to show artwork and playback position, and to play, pause and skip tracks in Music and Spotify.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Stitchy Face ID uses the camera only while you enroll or run a check. Frames are processed on this Mac and never saved or uploaded.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Stitchy shows today's events and reminds you before meetings. Calendar data stays on this Mac.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Stitchy shows today's events and reminds you before meetings. Calendar data stays on this Mac.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Stitchy watches your Downloads folder to show download progress in the island. It never moves or deletes files.</string>
 </dict>

@@ -3,8 +3,9 @@ import SwiftUI
 
 /// Development aid: `Stitchy --snapshots <dir>` renders each island state to
 /// PNG with ImageRenderer and exits. Used to review the design without a
-/// screen recording permission. Run the bare binary (not the .app) so no
-/// notification permission is requested.
+/// Screen Recording permission. Run the bare binary (not the .app) so no
+/// notification permission is requested. A grey band stands in for the
+/// menu bar so the attachment to the top edge is visible.
 @MainActor
 enum SnapshotRenderer {
     private(set) static var isRendering = false
@@ -20,19 +21,22 @@ enum SnapshotRenderer {
         services.battery.start()
         services.network.start()
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        services.shelf.add([URL(fileURLWithPath: "/System/Applications/Calculator.app"), URL(fileURLWithPath: "/etc/hosts"), URL(fileURLWithPath: "/Library/Desktop Pictures")])
+        services.island.menuBarHeight = 30
+        services.shelf.add([URL(fileURLWithPath: "/System/Applications/Calculator.app"), URL(fileURLWithPath: "/etc/hosts")])
         services.feed.add(ActivityEvent(symbol: "bolt.fill", tint: .green, title: "Charging", detail: "Power adapter", trailing: "80%"))
-        services.feed.add(ActivityEvent(symbol: "timer", tint: .orange, title: "Timer Done", detail: "5 min timer finished"))
+        services.clipboard.record(.init(content: .text("https://developer.apple.com/documentation/swiftui"), sourceApp: "Safari"))
+        services.clipboard.record(.init(content: .text("let island = NotchShape(shoulder: 8, bottomRadius: 12)"), sourceApp: "Xcode"))
+        services.notes.create("Groceries\nOat milk, coffee, lemons")
         let model = services.island
 
         func render(_ name: String) {
-            let view = IslandRootView()
-                .frame(width: IslandMetrics.panel.width, height: IslandMetrics.panel.height)
-                .background(Color(white: 0.82))
-                .environment(services.island).environment(services.settings).environment(services.feed)
-                .environment(services.battery).environment(services.network).environment(services.nowPlaying)
-                .environment(services.timer).environment(services.shelf).environment(services.downloads)
-                .environment(services.notifier)
+            let view = ZStack(alignment: .top) {
+                Color(white: 0.86)
+                Color(white: 0.74).frame(height: 30)  // menu bar stand-in
+                IslandRootView()
+            }
+            .frame(width: IslandGeometry.panel.width, height: IslandGeometry.panel.height)
+            .stitchyEnvironment(services)
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2
             guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
@@ -40,21 +44,21 @@ enum SnapshotRenderer {
             try? png.write(to: dir.appendingPathComponent("\(name).png"))
         }
 
-        render("1-compact")
-        model.setHovering(true); render("2-compact-hover"); model.setHovering(false)
+        render("01-compact")
+        model.setHovering(true); render("02-hover"); model.setHovering(false)
         model.present(ActivityEvent(symbol: "bolt.fill", tint: .green, title: "Charging", detail: "96W power adapter", trailing: "82%"))
-        render("3-alert")
+        render("03-alert")
         model.dismissAlert()
+        model.showHUD(HUDEvent(symbol: "speaker.wave.3.fill", title: "MacBook Speakers", level: 0.62))
+        render("04-hud")
+        RunLoop.main.run(until: Date().addingTimeInterval(1.8))
+        services.timers.addCountdown(seconds: 25 * 60, label: "Tea")
+        services.timers.stopwatch.start()
+        render("05-live-timer")
         for tab in IslandTab.allCases {
             model.expand(.click, tab: tab)
-            render("4-expanded-\(tab.rawValue)")
+            render("06-expanded-\(tab.rawValue)")
         }
-        model.collapse()
-        services.timer.setDuration(25 * 60)
-        services.timer.start()
-        render("5-compact-timer")
-        model.expand(.click, tab: .timer)
-        render("6-expanded-timer-running")
         print("Snapshots written to \(dir.path)")
         return true
     }

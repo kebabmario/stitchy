@@ -66,6 +66,9 @@ enum SystemSettingsLink {
     static let automation = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
     static let filesAndFolders = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!
     static let notifications = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+    static let calendars = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!
+    static let camera = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
+    static let pasteboard = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!
     static let loginItems = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
 
     @MainActor
@@ -73,6 +76,13 @@ enum SystemSettingsLink {
 }
 
 extension TimeInterval {
+    /// Elapsed-style clock ("0:07"), rounding down.
+    var clockStringFloor: String {
+        let total = Int(self)
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
     /// "4:05" or "1:02:03".
     var clockString: String {
         let total = Int(self.rounded(.up))
@@ -101,5 +111,23 @@ extension NSImage {
         var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, alpha: CGFloat = 0
         color.usingColorSpace(.sRGB)?.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &alpha)
         return NSColor(hue: hue, saturation: min(sat * 1.1, 0.85), brightness: max(bri, 0.75), alpha: 1)
+    }
+}
+
+import SwiftUI
+
+extension View {
+    /// Injects every observable service a Stitchy view may read.
+    @MainActor
+    func stitchyEnvironment(_ s: AppServices) -> some View {
+        self
+            .environment(s)
+            .environment(s.island).environment(s.settings).environment(s.feed)
+            .environment(s.battery).environment(s.network).environment(s.nowPlaying)
+            .environment(s.timers).environment(s.shelf).environment(s.downloads)
+            .environment(s.notifier).environment(s.clipboard).environment(s.audio)
+            .environment(s.privacy).environment(s.notes).environment(s.calendar)
+            .environment(s.aiUsage).environment(s.launcher).environment(s.faceID)
+            .environment(s.privateLock)
     }
 }

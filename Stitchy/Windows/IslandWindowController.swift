@@ -24,28 +24,20 @@ final class IslandWindowController: NSObject {
     private var dragBaseline = NSPasteboard(name: .drag).changeCount
     private var isDragging = false
     private(set) var isVisible = false
+    /// Hidden because the frontmost app is in full screen (setting).
+    private var hiddenForFullScreen = false
 
     /// Extra slack around the island so tiny pointer jitter at the edge
-    /// doesn't flicker between states.
-    private let hoverMargin: CGFloat = 6
+    /// doesn't flicker between states (Settings › Hover sensitivity).
+    private var hoverMargin: CGFloat { settings.hoverMargin }
     private let exitDelay: Duration = .milliseconds(260)
 
     init(services: AppServices) {
         self.services = services
-        panel = IslandPanel(size: IslandMetrics.panel)
+        panel = IslandPanel(size: IslandGeometry.panel)
         super.init()
 
-        let root = IslandRootView()
-            .environment(services.island)
-            .environment(services.settings)
-            .environment(services.feed)
-            .environment(services.battery)
-            .environment(services.network)
-            .environment(services.nowPlaying)
-            .environment(services.timer)
-            .environment(services.shelf)
-            .environment(services.downloads)
-            .environment(services.notifier)
+        let root = IslandRootView().stitchyEnvironment(services)
         let host = IslandHostingView(rootView: root)
         host.sizingOptions = []
         panel.contentView = host
@@ -56,11 +48,14 @@ final class IslandWindowController: NSObject {
 
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(reposition), name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         observeContinuously { [weak self] in
             guard let self else { return }
-            _ = (self.settings.topGap, self.settings.horizontalOffset, self.settings.display)
+            _ = (self.settings.topGap, self.settings.horizontalOffset, self.settings.display, self.settings.hideInFullScreen)
             self.reposition()
+            self.updateFullScreenVisibility()
         }
     }
 
@@ -82,22 +77,66 @@ final class IslandWindowController: NSObject {
         panel.orderOut(nil)
     }
 
+    /// Pins the panel's top edge to the top of the display (NSScreen.frame,
+    /// not visibleFrame), horizontally centred.
     @objc private func reposition() {
         guard let screen = ScreenLocator.screen(for: settings.display) else { return }
-        let size = IslandMetrics.panel
-        let visible = screen.frame
-        var x = visible.midX - size.width / 2 + settings.horizontalOffset
-        x = min(max(x, visible.minX), visible.maxX - size.width)
+        let size = IslandGeometry.panel
+        let full = screen.frame
+        var x = full.midX - size.width / 2 + settings.horizontalOffset
+        x = min(max(x, full.minX), full.maxX - size.width)
         let frame = NSRect(
             x: x.rounded(),
-            y: (visible.maxY - settings.topGap - size.height).rounded(),
+            y: (full.maxY - settings.topGap - size.height).rounded(),
             width: size.width, height: size.height
         )
+        // The default notch height matches this display's menu bar.
+        let menuBar = full.maxY - screen.visibleFrame.maxY
+        model.menuBarHeight = menuBar > 0 ? menuBar : max(NSStatusBar.system.thickness, 24)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
     }
 
     @objc private func spaceChanged() {
-        if isVisible { panel.orderFrontRegardless() }
+        updateFullScreenVisibility()
+        // Space-switch animations settle a moment later; check once more.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            self?.updateFullScreenVisibility()
+        }
+    }
+
+    /// Hides the island while the frontmost app covers the whole display
+    /// (full screen), if enabled. Uses window bounds from CGWindowList,
+    /// which needs no Screen Recording permission.
+    private func updateFullScreenVisibility() {
+        guard isVisible else { return }
+        let hide = settings.hideInFullScreen && frontmostIsFullScreen()
+        if hide != hiddenForFullScreen {
+            hiddenForFullScreen = hide
+            if hide {
+                model.collapse()
+                setInteractive(false)
+                panel.orderOut(nil)
+            }
+        }
+        if !hide { panel.orderFrontRegardless() }
+    }
+
+    private func frontmostIsFullScreen() -> Bool {
+        guard let screen, let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              pid != ProcessInfo.processInfo.processIdentifier,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        let target = CGRect(x: screen.frame.minX, y: primaryHeight - screen.frame.maxY,
+                            width: screen.frame.width, height: screen.frame.height)
+        return windows.contains { w in
+            guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  (w[kCGWindowLayer as String] as? Int) == 0,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: b) else { return false }
+            return rect.integral == target.integral
+        }
     }
 
     // MARK: Geometry
@@ -106,10 +145,8 @@ final class IslandWindowController: NSObject {
 
     /// The island's target shape in screen coordinates (bottom-left origin).
     private var islandRect: NSRect {
-        let activity = LiveActivity.resolve(settings: settings, timer: services.timer,
-                                            downloads: services.downloads, nowPlaying: services.nowPlaying)
-        let size = IslandMetrics.size(expanded: model.isExpanded, tab: model.tab, hasAlert: model.alert != nil,
-                                      activity: activity, hovering: model.isHovering)
+        let mode = model.mode(hasLiveActivity: !services.compactActivities.isEmpty)
+        let size = model.geometry.size(mode, tab: model.tab)
         let frame = panel.frame
         return NSRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height, width: size.width, height: size.height)
     }
@@ -187,6 +224,7 @@ final class IslandWindowController: NSObject {
     }
 
     private func pointerMoved() {
+        guard !hiddenForFullScreen else { return }
         let inside = hitRect.contains(NSEvent.mouseLocation)
         setInteractive(inside)
         guard inside != model.isHovering else { return }
@@ -237,6 +275,7 @@ final class IslandWindowController: NSObject {
     /// dragged". The drop target itself filters for file URLs. No
     /// pasteboard *contents* are read here.
     private func dragMoved() {
+        guard !hiddenForFullScreen else { return }
         if !isDragging {
             guard NSPasteboard(name: .drag).changeCount != dragBaseline else { return }
             isDragging = true
