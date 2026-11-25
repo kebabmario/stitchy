@@ -170,6 +170,31 @@ final class LockScreenArtController {
     }
 }
 
+/// How a cover sits on the screen: fill it edge to edge, unless that would crop away
+/// more than `maxCrop` of the cover (very wide or tall art), then show it whole.
+enum ArtPlacement {
+    struct Placement: Equatable { let size: CGSize; let fills: Bool }
+
+    nonisolated static func place(_ image: CGSize, in screen: CGSize, maxCrop: CGFloat = 0.42) -> Placement {
+        guard image.width > 0, image.height > 0 else { return Placement(size: screen, fills: true) }
+        let fill = max(screen.width / image.width, screen.height / image.height)
+        let drawn = CGSize(width: image.width * fill, height: image.height * fill)
+        let cropped = 1 - (screen.width * screen.height) / (drawn.width * drawn.height)
+        if cropped <= maxCrop { return Placement(size: drawn, fills: true) }
+        let fit = min(screen.width / image.width, screen.height / image.height)
+        return Placement(size: CGSize(width: image.width * fit, height: image.height * fit), fills: false)
+    }
+
+    /// Soft edges on all four sides for a cover shown whole.
+    static var featherMask: some View {
+        Rectangle().fill(.black)
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.1),
+                                         .init(color: .black, location: 0.9), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.1),
+                                         .init(color: .black, location: 0.9), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
+    }
+}
+
 /// Shared geometry for the lyrics layout (fractions of the screen).
 enum LockScreenLayout {
     /// Lyrics panel: the right side.
@@ -211,7 +236,7 @@ struct LockScreenArtView: View {
                                            .init(color: .black.opacity(0.8), location: 1)], startPoint: .top, endPoint: .bottom)
                     clock(geo.size)
                         .frame(width: geo.size.width * (state.showLyrics ? LockScreenLayout.leftCenter * 2 : 1))
-                    if let cutout { fill(cutout, size: geo.size).transition(.opacity) }
+                    if let cutout { fill(cutout, size: geo.size, sharpOnly: true).transition(.opacity) }
                     if state.showLyrics {
                         lyricsPanel(geo.size)
                             .transition(.opacity.combined(with: .offset(x: 40)))
@@ -253,11 +278,25 @@ struct LockScreenArtView: View {
         .frame(width: size.width, height: size.height)
     }
 
-    /// Aspect-filled to the whole screen; the art, its soft edges and its cutout share this frame.
-    @ViewBuilder private func fill(_ image: NSImage?, size: CGSize) -> some View {
+    /// The art placed for this screen (see `ArtPlacement`). A cover that fills is drawn edge to edge;
+    /// one that would lose too much to cropping is shown whole, its edges fading into a blurred copy.
+    /// The cutout uses the same placement (`sharpOnly`), so the clock depth still lines up.
+    @ViewBuilder private func fill(_ image: NSImage?, size: CGSize, sharpOnly: Bool = false) -> some View {
         if let image {
-            Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
-                .frame(width: size.width, height: size.height).clipped()
+            let source = music.artwork?.size ?? image.size
+            let placement = ArtPlacement.place(source, in: size)
+            ZStack {
+                if !placement.fills, !sharpOnly {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: size.width, height: size.height).clipped()
+                        .blur(radius: 60).overlay(Color.black.opacity(0.2))
+                }
+                Image(nsImage: image).resizable().interpolation(.high).antialiased(true)
+                    .frame(width: placement.size.width, height: placement.size.height)
+                    .mask { placement.fills ? AnyView(Color.black) : AnyView(ArtPlacement.featherMask) }
+            }
+            .frame(width: size.width, height: size.height)
+            .clipped()
         } else {
             LinearGradient(colors: [music.accent.opacity(0.7), .black], startPoint: .top, endPoint: .bottom)
         }

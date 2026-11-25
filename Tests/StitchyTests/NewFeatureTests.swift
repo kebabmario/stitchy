@@ -655,3 +655,23 @@ private extension NSColor {
         #expect(f.width <= 660 && f.height == 290)
     }
 }
+
+@Suite struct ArtworkQualityTests {
+    @Test func spotifyHighResURL() {
+        let small = URL(string: "https://i.scdn.co/image/ab67616d0000b273831949037a1db10b87b005fa")!
+        #expect(NowPlayingService.spotifyHighResURL(small)?.absoluteString == "https://i.scdn.co/image/ab67616d000082c1831949037a1db10b87b005fa")
+        #expect(NowPlayingService.spotifyHighResURL(URL(string: "https://example.com/ab67616d0000b273x")!) == nil)
+    }
+
+    @Test func placementFillsSquareButShowsVeryWideWhole() {
+        let screen = CGSize(width: 1440, height: 900)
+        let square = ArtPlacement.place(CGSize(width: 2000, height: 2000), in: screen)
+        #expect(square.fills && square.size == CGSize(width: 1440, height: 1440))
+        let wide = ArtPlacement.place(CGSize(width: 3000, height: 1000), in: screen)   // 3:1 would lose ~47%
+        #expect(!wide.fills && wide.size == CGSize(width: 1440, height: 480))
+        let tall = ArtPlacement.place(CGSize(width: 1000, height: 1500), in: screen)
+        #expect(!tall.fills && tall.size.height == 900)
+        let video = ArtPlacement.place(CGSize(width: 1920, height: 1080), in: screen)  // 16:9 crops ~10%
+        #expect(video.fills)
+    }
+}

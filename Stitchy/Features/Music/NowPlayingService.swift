@@ -261,14 +261,47 @@ final class NowPlayingService: NSObject {
             let result = await AppleScriptRunner.run(
                 "tell application \"Music\" to get raw data of artwork 1 of current track"
             ) { $0.data }
-            if case .success(let data?) = result { return NSImage(data: data) }
-            return nil
+            var image: NSImage?
+            if case .success(let data?) = result { image = NSImage(data: data) }
+            // Streamed tracks often carry a small cover; Apple's public catalogue has a large one.
+            if Self.pixelWidth(image) < 1000, let track,
+               let big = await Self.catalogueArtwork(title: track.title, artist: track.artist) { return big }
+            return image
         case .spotify:
-            // Spotify only exposes an https URL to its own artwork CDN.
-            guard let artworkURL, let url = URL(string: artworkURL), url.scheme == "https",
-                  let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+            // Spotify only exposes an https URL to its own artwork CDN (640 px). The same
+            // CDN serves the cover at up to 2000 px under another size code; fall back if not.
+            guard let artworkURL, let url = URL(string: artworkURL), url.scheme == "https" else { return nil }
+            if let big = Self.spotifyHighResURL(url), let (data, _) = try? await URLSession.shared.data(from: big),
+               let image = NSImage(data: data) { return image }
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
             return NSImage(data: data)
         }
+    }
+
+    /// i.scdn.co 640 px / 300 px / 64 px size codes → the 2000 px one.
+    nonisolated static func spotifyHighResURL(_ url: URL) -> URL? {
+        guard url.host == "i.scdn.co" else { return nil }
+        let s = url.absoluteString
+        for code in ["ab67616d0000b273", "ab67616d00001e02", "ab67616d00004851"] where s.contains(code) {
+            return URL(string: s.replacingOccurrences(of: code, with: "ab67616d000082c1"))
+        }
+        return nil
+    }
+
+    nonisolated static func pixelWidth(_ image: NSImage?) -> Int {
+        image?.representations.map(\.pixelsWide).max() ?? 0
+    }
+
+    /// A large cover from Apple's iTunes Search API (public, no account). Sends only title and artist.
+    nonisolated static func catalogueArtwork(title: String, artist: String) async -> NSImage? {
+        var c = URLComponents(string: "https://itunes.apple.com/search")
+        c?.queryItems = [.init(name: "term", value: "\(artist) \(title)"), .init(name: "entity", value: "song"), .init(name: "limit", value: "1")]
+        guard let url = c?.url, let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let small = (json["results"] as? [[String: Any]])?.first?["artworkUrl100"] as? String,
+              let bigURL = URL(string: small.replacingOccurrences(of: "100x100bb", with: "2000x2000bb")),
+              let (img, _) = try? await URLSession.shared.data(from: bigURL) else { return nil }
+        return NSImage(data: img)
     }
 
     // MARK: Controls

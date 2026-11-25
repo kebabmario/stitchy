@@ -526,6 +526,7 @@ struct PrivacySettingsView: View {
             Section("Network Services") {
                 LabeledContent("Lyrics (LRCLIB)", value: settings.lyricsEnabled ? "On: title, artist, album, length" : "Off")
                 LabeledContent("Weather (Open-Meteo)", value: settings.weatherEnabled ? "On: rounded coordinates of your place" : "Off")
+                LabeledContent("Cover art", value: "Spotify's image server; Apple's iTunes catalogue for small Apple Music covers (title and artist)")
                 Text("Nothing else leaves your Mac. No accounts, no analytics.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Not Required") {
