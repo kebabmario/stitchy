@@ -54,7 +54,8 @@ final class Launcher {
     func search(_ query: String) -> [Result] {
         let q = query.trimmingCharacters(in: .whitespaces)
         let matches: (String) -> Bool = { q.isEmpty || $0.localizedCaseInsensitiveContains(q) }
-        var results: [Result] = items.filter { matches($0.name) }.map(Result.item)
+        var results: [Result] = quickCommands(q).map(Result.action)
+        results += items.filter { matches($0.name) }.map(Result.item)
         results += actions.filter { $0.isAvailable() && matches($0.title) }.map(Result.action)
         if !q.isEmpty {
             let configured = Set(items.filter { $0.kind == .app }.map(\.target))
@@ -63,6 +64,65 @@ final class Launcher {
         }
         return results
     }
+
+    // MARK: Quick commands
+
+    nonisolated static let thingsID = "com.culturedcode.ThingsMac"
+    nonisolated static let obsidianID = "md.obsidian"
+
+    /// Typed commands shown above normal results:
+    ///  - math ("12*7", "sqrt(2)") → copy the answer
+    ///  - "todo …" → new task in Things (URL scheme, if installed)
+    ///  - "obsidian …" → append to a "Stitchy Inbox" note in Obsidian (URL scheme, if installed)
+    func quickCommands(_ q: String) -> [Action] {
+        var out: [Action] = []
+        if let answer = Self.calculation(q) {
+            out.append(Action(id: "calc", title: "= \(answer)  (copy)", symbol: "equal") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(answer, forType: .string)
+            })
+        }
+        if let text = Self.argument(q, prefixes: ["todo ", "things "]), Self.installed(Self.thingsID),
+           let url = Self.thingsURL(text) {
+            out.append(Action(id: "things", title: "Add “\(text)” to Things", symbol: "checkmark.square") { NSWorkspace.shared.open(url) })
+        }
+        if let text = Self.argument(q, prefixes: ["obsidian ", "obs "]), Self.installed(Self.obsidianID),
+           let url = Self.obsidianURL(text) {
+            out.append(Action(id: "obsidian", title: "Add to Obsidian “Stitchy Inbox”", symbol: "diamond") { NSWorkspace.shared.open(url) })
+        }
+        return out
+    }
+
+    /// The formatted answer when the query is a calculation (needs an operator or function, not just a number).
+    nonisolated static func calculation(_ q: String) -> String? {
+        guard q.rangeOfCharacter(from: .decimalDigits) != nil,
+              q.rangeOfCharacter(from: CharacterSet(charactersIn: "+-*/×÷^%!(")) != nil,
+              let v = try? Calculator().evaluate(q) else { return nil }
+        return Calculator.format(v)
+    }
+
+    nonisolated static func argument(_ q: String, prefixes: [String]) -> String? {
+        for p in prefixes where q.lowercased().hasPrefix(p) {
+            let rest = q.dropFirst(p.count).trimmingCharacters(in: .whitespaces)
+            return rest.isEmpty ? nil : rest
+        }
+        return nil
+    }
+
+    nonisolated static func thingsURL(_ title: String) -> URL? {
+        var c = URLComponents(string: "things:///add")
+        c?.queryItems = [URLQueryItem(name: "title", value: title)]
+        return c?.url
+    }
+
+    nonisolated static func obsidianURL(_ text: String) -> URL? {
+        var c = URLComponents(string: "obsidian://new")
+        c?.queryItems = [URLQueryItem(name: "file", value: "Stitchy Inbox"), URLQueryItem(name: "content", value: "- " + text + "\n"),
+                         URLQueryItem(name: "append", value: "true")]
+        return c?.url
+    }
+
+    private static func installed(_ bundleID: String) -> Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil }
 
     func run(_ result: Result) {
         islandLog.info("launcher run \(result.id, privacy: .public)")

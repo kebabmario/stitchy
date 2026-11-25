@@ -40,6 +40,16 @@ final class GlobalHotkey {
 }
 
 private func hotkeyCallback(_ next: EventHandlerCallRef?, _ event: EventRef?, _ data: UnsafeMutableRawPointer?) -> OSStatus {
+    // Only our launcher key (id 1); other Stitchy hotkeys (window snapping) pass through.
+    guard let id = carbonHotKeyID(event), id.signature == OSType(0x5354_4348), id.id == 1 else { return OSStatus(eventNotHandledErr) }
     NotificationCenter.default.post(name: GlobalHotkey.pressed, object: nil)
     return noErr
+}
+
+func carbonHotKeyID(_ event: EventRef?) -> EventHotKeyID? {
+    guard let event else { return nil }
+    var id = EventHotKeyID()
+    let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                   nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+    return status == noErr ? id : nil
 }

@@ -38,6 +38,13 @@ enum AnimationStyle: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Attached notch (flush with the top edge) or floating Dynamic Island pill.
+enum IslandStyle: String, CaseIterable, Identifiable, Sendable {
+    case notch, island
+    var id: String { rawValue }
+    var title: String { self == .notch ? "Notch" : "Dynamic Island" }
+}
+
 enum DisplayChoice: String, CaseIterable, Identifiable, Sendable {
     case builtIn, primary
 
@@ -70,6 +77,7 @@ final class AppSettings {
 
     // Island appearance
     var islandVisible = true { didSet { save(islandVisible, "islandVisible") } }
+    var style = IslandStyle.notch { didSet { save(style.rawValue, "style") } }
     /// Width of the resting notch, in points.
     var notchWidth = 190.0 { didSet { save(notchWidth, "notchWidth") } }
     /// Height of the resting notch; 0 = match the menu bar.
@@ -105,11 +113,35 @@ final class AppSettings {
     var notesEnabled = true { didSet { save(notesEnabled, "notesEnabled") } }
     /// Off until the user grants calendar access from the Calendar tab.
     var calendarEnabled = false { didSet { save(calendarEnabled, "calendarEnabled") } }
+    var toolsEnabled = true { didSet { save(toolsEnabled, "toolsEnabled") } }
     var launcherEnabled = true { didSet { save(launcherEnabled, "launcherEnabled") } }
     /// Off by default: reads local coding-agent logs only after opt-in.
     var aiUsageEnabled = false { didSet { save(aiUsageEnabled, "aiUsageEnabled") } }
     var hudEnabled = true { didSet { save(hudEnabled, "hudEnabled") } }
     var privacyGuardEnabled = true { didSet { save(privacyGuardEnabled, "privacyGuardEnabled") } }
+    var bluetoothEnabled = true { didSet { save(bluetoothEnabled, "bluetoothEnabled") } }
+    var drivesEnabled = true { didSet { save(drivesEnabled, "drivesEnabled") } }
+    /// On by default; sends the playing track's title/artist/album/length to lrclib.net.
+    var lyricsEnabled = true { didSet { save(lyricsEnabled, "lyricsEnabled") } }
+    var shakeToShelf = true { didSet { save(shakeToShelf, "shakeToShelf") } }
+    var compactLyrics = true { didSet { save(compactLyrics, "compactLyrics") } }
+    /// Show the island on the lock screen (private SkyLight API).
+    var lockScreenIsland = true { didSet { save(lockScreenIsland, "lockScreenIsland") } }
+    /// The user's own Spotify developer app Client ID (public, not a secret).
+    var spotifyClientID = "" { didSet { save(spotifyClientID, "spotifyClientID") } }
+    /// Off until the user picks a location or city in the Weather tab.
+    var weatherEnabled = false { didSet { save(weatherEnabled, "weatherEnabled") } }
+    var weatherFahrenheit = Locale.current.measurementSystem == .us { didSet { save(weatherFahrenheit, "weatherFahrenheit") } }
+    var weatherAlerts = true { didSet { save(weatherAlerts, "weatherAlerts") } }
+    /// Show temperature in the compact island when nothing else is live.
+    var compactWeather = false { didSet { save(compactWeather, "compactWeather") } }
+    /// Shortcuts (made with "Set Focus") that turn a Focus on and off.
+    var focusOnShortcut = "" { didSet { save(focusOnShortcut, "focusOnShortcut") } }
+    var focusOffShortcut = "" { didSet { save(focusOffShortcut, "focusOffShortcut") } }
+    /// Opt-in: mirror call/message banners via Accessibility.
+    var mirrorEnabled = false { didSet { save(mirrorEnabled, "mirrorEnabled") } }
+    var mirrorHidePreviews = false { didSet { save(mirrorHidePreviews, "mirrorHidePreviews") } }
+    var mirrorOtherApps = false { didSet { save(mirrorOtherApps, "mirrorOtherApps") } }
 
     // Activity visibility in the compact island
     var compactActivities = true { didSet { save(compactActivities, "compactActivities") } }
@@ -139,6 +171,19 @@ final class AppSettings {
 
     // Shelf
     var shelfPreviews = true { didSet { save(shelfPreviews, "shelfPreviews") } }
+    /// Droppy-style: new screenshots appear on the shelf. Opt-in.
+    var screenshotsToShelf = false { didSet { save(screenshotsToShelf, "screenshotsToShelf") } }
+    /// DockDoor-style window previews on Dock hover. Opt-in (Accessibility + Screen Recording).
+    var dockPreviewsEnabled = false { didSet { save(dockPreviewsEnabled, "dockPreviewsEnabled") } }
+    /// Keyboard window snapping. Opt-in (Accessibility).
+    var windowSnapEnabled = false { didSet { save(windowSnapEnabled, "windowSnapEnabled") } }
+    /// Alerts when an Xcode build finishes (reads DerivedData logs). Opt-in.
+    var xcodeBuildAlerts = false { didSet { save(xcodeBuildAlerts, "xcodeBuildAlerts") } }
+    /// Live Claude Code / Codex activity from their local session logs. Opt-in.
+    var agentActivityEnabled = false { didSet { save(agentActivityEnabled, "agentActivityEnabled") } }
+    /// Break reminders after active use. Opt-in.
+    var breakReminders = false { didSet { save(breakReminders, "breakReminders") } }
+    var breakMinutes = 50.0 { didSet { save(breakMinutes, "breakMinutes") } }
 
     // Calendar
     var meetingReminderMinutes = 5.0 { didSet { save(meetingReminderMinutes, "meetingReminderMinutes") } }
@@ -147,9 +192,28 @@ final class AppSettings {
     var hotkeyEnabled = true { didSet { save(hotkeyEnabled, "hotkeyEnabled") } }
     var hotkey = HotkeyPreset.controlOptionSpace { didSet { save(hotkey.rawValue, "hotkey") } }
 
-    // Face ID
-    var faceIDEnabled = false { didSet { save(faceIDEnabled, "faceIDEnabled") } }
-    var privateSectionsLocked = false { didSet { save(privateSectionsLocked, "privateSectionsLocked") } }
+    // Security-sensitive values are read-only here: they change only through
+    // PrivateLock / SensitiveGate, which authenticate first.
+    private(set) var privateSectionsLocked = false { didSet { save(privateSectionsLocked, "privateSectionsLocked") } }
+    private(set) var requireAuthForSensitive = false { didSet { save(requireAuthForSensitive, "requireAuthForSensitive") } }
+
+    // Notes
+    /// Set when the user connects Apple Notes (Automation consent).
+    var appleNotesEnabled = false { didSet { save(appleNotesEnabled, "appleNotesEnabled") } }
+    /// Folder for notes created from Stitchy (Apple Notes folder id); empty = Notes' default.
+    var notesFolderID = "" { didSet { save(notesFolderID, "notesFolderID") } }
+
+    enum SecureSetting {
+        case privateSectionsLocked(Bool), requireAuthForSensitive(Bool)
+    }
+
+    /// Only call after SensitiveGate.authorize succeeded.
+    func applyAuthorized(_ change: SecureSetting) {
+        switch change {
+        case .privateSectionsLocked(let v): privateSectionsLocked = v
+        case .requireAuthForSensitive(let v): requireAuthForSensitive = v
+        }
+    }
 
     /// Password managers and keychain tools never recorded by clipboard history.
     static let defaultExcludedApps = [
@@ -170,6 +234,7 @@ final class AppSettings {
         func n(_ k: String, _ d: Double) -> Double { defaults.object(forKey: k) as? Double ?? d }
         func s(_ k: String) -> String { defaults.string(forKey: k) ?? "" }
         islandVisible = b("islandVisible", true)
+        style = IslandStyle(rawValue: s("style")) ?? .notch
         notchWidth = n("notchWidth", 190)
         notchHeight = n("notchHeight", 0)
         expandedWidth = n("expandedWidth", 460)
@@ -195,9 +260,32 @@ final class AppSettings {
         notesEnabled = b("notesEnabled", true)
         calendarEnabled = b("calendarEnabled", false)
         launcherEnabled = b("launcherEnabled", true)
+        toolsEnabled = b("toolsEnabled", true)
         aiUsageEnabled = b("aiUsageEnabled", false)
         hudEnabled = b("hudEnabled", true)
         privacyGuardEnabled = b("privacyGuardEnabled", true)
+        bluetoothEnabled = b("bluetoothEnabled", true)
+        drivesEnabled = b("drivesEnabled", true)
+        lyricsEnabled = b("lyricsEnabled", true)
+        // 1.3: lyrics default to on. Earlier builds stored `false` without the
+        // user choosing it, so flip that once; a later choice is respected.
+        if defaults.object(forKey: "migratedLyricsDefault13") == nil {
+            defaults.set(true, forKey: "migratedLyricsDefault13")
+            lyricsEnabled = true
+        }
+        shakeToShelf = b("shakeToShelf", true)
+        compactLyrics = b("compactLyrics", true)
+        lockScreenIsland = b("lockScreenIsland", true)
+        spotifyClientID = s("spotifyClientID")
+        weatherEnabled = b("weatherEnabled", false)
+        weatherFahrenheit = b("weatherFahrenheit", Locale.current.measurementSystem == .us)
+        weatherAlerts = b("weatherAlerts", true)
+        compactWeather = b("compactWeather", false)
+        focusOnShortcut = s("focusOnShortcut")
+        focusOffShortcut = s("focusOffShortcut")
+        mirrorEnabled = b("mirrorEnabled", false)
+        mirrorHidePreviews = b("mirrorHidePreviews", false)
+        mirrorOtherApps = b("mirrorOtherApps", false)
         compactActivities = b("compactActivities", true)
         showTimerActivity = b("showTimerActivity", true)
         showMusicActivity = b("showMusicActivity", true)
@@ -214,17 +302,29 @@ final class AppSettings {
         clipboardIgnoreConcealed = b("clipboardIgnoreConcealed", true)
         clipboardExcludedApps = defaults.stringArray(forKey: "clipboardExcludedApps") ?? Self.defaultExcludedApps
         shelfPreviews = b("shelfPreviews", true)
+        screenshotsToShelf = b("screenshotsToShelf", false)
+        dockPreviewsEnabled = b("dockPreviewsEnabled", false)
+        windowSnapEnabled = b("windowSnapEnabled", false)
+        xcodeBuildAlerts = b("xcodeBuildAlerts", false)
+        agentActivityEnabled = b("agentActivityEnabled", false)
+        breakReminders = b("breakReminders", false)
+        breakMinutes = n("breakMinutes", 50)
         meetingReminderMinutes = n("meetingReminderMinutes", 5)
         hotkeyEnabled = b("hotkeyEnabled", true)
         hotkey = HotkeyPreset(rawValue: s("hotkey")) ?? .controlOptionSpace
-        faceIDEnabled = b("faceIDEnabled", false)
         privateSectionsLocked = b("privateSectionsLocked", false)
+        // Face Unlock was removed; drop its stored preferences.
+        for key in ["faceIDEnabled", "faceUnlockMode", "faceStrictness", "lockScreenFaceCheck"] { defaults.removeObject(forKey: key) }
+        requireAuthForSensitive = b("requireAuthForSensitive", false)
+        notesFolderID = s("notesFolderID")
+        appleNotesEnabled = b("appleNotesEnabled", false)
     }
 
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
 
     /// Restores every preference to its default. User data ("data." keys,
-    /// notes, shelf) is kept.
+    /// notes, shelf) is kept. Callers must pass SensitiveGate first when
+    /// sensitive-action protection is on (reset changes security settings).
     func reset() {
         for key in defaults.dictionaryRepresentation().keys where !key.hasPrefix("data.") {
             defaults.removeObject(forKey: key)

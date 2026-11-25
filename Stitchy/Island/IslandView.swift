@@ -24,11 +24,11 @@ struct IslandView: View {
 
     var body: some View {
         let activities = services.compactActivities
-        let mode = model.mode(hasLiveActivity: !activities.isEmpty)
+        let mode = services.islandMode
         let geometry = model.geometry
-        let size = geometry.size(mode, tab: model.tab)
-        let shape = NotchShape(shoulder: geometry.shoulder(mode), bottomRadius: geometry.bottomRadius(mode))
-        let inset = geometry.shoulder(mode)
+        let size = services.islandSize(mode)
+        let shape = NotchShape(shoulder: geometry.shoulder(mode), bottomRadius: geometry.bottomRadius(mode), topRadius: geometry.topRadius(mode))
+        let inset = max(geometry.shoulder(mode), geometry.style == .island && mode == .expanded ? 6 : 0)
 
         ZStack(alignment: .top) {
             switch mode {
@@ -53,10 +53,14 @@ struct IslandView: View {
                         .padding(.horizontal, inset)
                         .transition(.blurReplace.animation(.easeOut(duration: 0.18)))
                 }
-            case .live:
-                CompactIslandView(activities: activities, notchWidth: geometry.notchWidth)
-                    .padding(.horizontal, inset)
-                    .transition(.blurReplace.animation(.easeOut(duration: 0.2)))
+            case .live, .liveLyrics:
+                VStack(spacing: 0) {
+                    CompactIslandView(activities: activities, notchWidth: geometry.notchWidth)
+                        .frame(height: geometry.notchHeight)
+                    if mode == .liveLyrics { CompactLyricLine().frame(height: IslandGeometry.lyricStrip, alignment: .top) }
+                }
+                .padding(.horizontal, inset)
+                .transition(.blurReplace.animation(.easeOut(duration: 0.2)))
             case .compact, .hover:
                 Color.clear
             }

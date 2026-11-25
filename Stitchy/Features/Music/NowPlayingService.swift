@@ -166,11 +166,13 @@ final class NowPlayingService: NSObject {
         islandLog.info("now playing \(source.name, privacy: .public) state=\(String(describing: newState), privacy: .public) new=\(isNewTrack, privacy: .public)")
 
         if isNewTrack {
-            artwork = nil
-            accent = .white
+            embeddedLyrics = nil
+            // Keep the old art until the new one loads (crossfade); clear it
+            // when artwork can't be fetched at all.
+            if !settings.musicControlsEnabled { artwork = nil; accent = .white }
             if settings.musicControlsEnabled {
                 Task { await refreshDetails(for: source, trackID: newTrack.id, announce: newState == .playing) }
-            } else if newState == .playing {
+            } else {
                 onTrackChange?(newTrack, nil)
             }
         } else if settings.musicControlsEnabled, source == .music {
@@ -215,8 +217,10 @@ final class NowPlayingService: NSObject {
         }
         guard case .success(let fields?) = result else {
             if case .failure(.notPermitted) = result { permission = .denied }
+            islandLog.info("now playing refresh failed for \(source.name, privacy: .public): \(String(describing: result), privacy: .public)")
             return
         }
+        islandLog.info("now playing refresh \(source.name, privacy: .public) state=\(fields.first ?? "?", privacy: .public)")
         permission = .granted
         guard fields.count >= 7, fields[0] == "playing" || fields[0] == "paused" else { return }
         let id = fields[6]
@@ -225,6 +229,7 @@ final class NowPlayingService: NSObject {
             player = source
             state = fields[0] == "playing" ? .playing : .paused
             track = Track(id: id, title: fields[1], artist: fields[2], album: fields[3], duration: Double(fields[4]))
+            islandLog.info("now playing \(source.name, privacy: .public) synced at launch state=\(fields[0], privacy: .public)")
         } else if let current = track, let duration = Double(fields[4]) {
             track = Track(id: current.id, title: current.title, artist: current.artist, album: current.album, duration: duration)
         }
@@ -235,6 +240,7 @@ final class NowPlayingService: NSObject {
         guard track?.id == trackID || trackID == nil else { return }
         artwork = image
         accent = image?.averageColor().map(Color.init(nsColor:)) ?? .white
+        await refreshExtras()
         if announce, let track { onTrackChange?(track, image) }
     }
 
@@ -268,6 +274,87 @@ final class NowPlayingService: NSObject {
     // MARK: Controls
 
     func playPause() { send("playpause") { $0.state = $0.state == .playing ? .paused : .playing } }
+
+    /// Dev aid for `--snapshots` renders only.
+    func loadPreview(_ t: Track, artwork: NSImage?) {
+        player = .spotify; track = t; state = .playing; self.artwork = artwork
+        accent = artwork?.averageColor().map(Color.init(nsColor:)) ?? .white
+        position = 47; positionDate = Date(); shuffle = true; repeatMode = .all; volume = 0.6
+    }
+
+    // MARK: Shuffle, repeat, volume, seek, embedded lyrics
+
+    enum RepeatMode: String, Sendable { case off, all, one }
+
+    private(set) var shuffle: Bool?
+    private(set) var repeatMode: RepeatMode?
+    /// 0…1 player volume (the app's own volume, not the system's).
+    private(set) var volume: Double?
+    /// Plain lyrics stored with an Apple Music track, if any.
+    private(set) var embeddedLyrics: String?
+
+    func refreshExtras() async {
+        guard let player, player.isRunning, settings.musicControlsEnabled else { return }
+        let script = player == .music
+            ? "tell application \"Music\" to return {shuffle enabled, (song repeat as string), sound volume, lyrics of current track}"
+            : "tell application \"Spotify\" to return {shuffling, repeating, sound volume, \"\"}"
+        let result = await AppleScriptRunner.run(script) { d -> [String]? in
+            guard d.numberOfItems >= 4 else { return nil }
+            return [d.item(1)?.booleanValue == true ? "1" : "0", d.item(2)?.stringValue ?? (d.item(2)?.booleanValue == true ? "all" : "off"),
+                    String(d.item(3)?.int32Value ?? 0), d.item(4)?.stringValue ?? ""]
+        }
+        guard case .success(let f?) = result else { return }
+        shuffle = f[0] == "1"
+        repeatMode = player == .spotify ? (f[1] == "1" || f[1] == "true" || f[1] == "all" ? .all : .off) : RepeatMode(rawValue: f[1]) ?? .off
+        volume = Double(f[2]).map { $0 / 100 }
+        embeddedLyrics = f[3].isEmpty ? nil : f[3]
+    }
+
+    func toggleShuffle() {
+        guard let player, let current = shuffle else { return }
+        shuffle = !current
+        run(player == .music ? "set shuffle enabled to \(!current)" : "set shuffling to \(!current)")
+    }
+
+    /// Music cycles off → all → one; Spotify's scripting only has on/off.
+    func cycleRepeat() {
+        guard let player else { return }
+        let next: RepeatMode = switch (player, repeatMode ?? .off) {
+        case (.spotify, .off): .all
+        case (.spotify, _): .off
+        case (.music, .off): .all
+        case (.music, .all): .one
+        case (.music, .one): .off
+        }
+        repeatMode = next
+        run(player == .music ? "set song repeat to \(next.rawValue)" : "set repeating to \(next != .off)")
+    }
+
+    func setVolume(_ value: Double) {
+        volume = value
+        volumeTask?.cancel()
+        volumeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))   // coalesce slider drags
+            guard !Task.isCancelled, let self else { return }
+            self.run("set sound volume to \(Int((value * 100).rounded()))")
+        }
+    }
+    @ObservationIgnored private var volumeTask: Task<Void, Never>?
+
+    func seek(to seconds: TimeInterval) {
+        guard state != .stopped else { return }
+        position = seconds
+        positionDate = Date()
+        run("set player position to \(Int(seconds))")
+    }
+
+    private func run(_ command: String) {
+        guard let player, player.isRunning else { return }
+        Task {
+            let result = await AppleScriptRunner.run("tell application \"\(player.name)\" to \(command)") { _ in true }
+            if case .failure(.notPermitted) = result { permission = .denied }
+        }
+    }
     func next() { send("next track") }
     func previous() { send(player == .spotify ? "previous track" : "back track") }
 

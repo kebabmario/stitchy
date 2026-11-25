@@ -13,7 +13,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         tabs.tabStyle = .toolbar
         func page(_ title: String, _ symbol: String, height: CGFloat, _ view: some View) {
             let host = NSHostingController(rootView: view.stitchyEnvironment(services).frame(width: 540, height: height))
-            host.sizingOptions = [.preferredContentSize]
+            // Fixed size: automatic sizing recomputed the Form's size on every
+            // display cycle (measured ~5 % CPU while the island animated).
+            host.sizingOptions = []
+            host.preferredContentSize = NSSize(width: 540, height: height)
             let item = NSTabViewItem(viewController: host)
             item.label = title
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
@@ -24,7 +27,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         page("Features", "square.grid.2x2", height: 640, FeaturesSettingsView())
         page("Clipboard", "doc.on.clipboard", height: 520, ClipboardSettingsView())
         page("Launcher", "magnifyingglass", height: 460, LauncherSettingsView())
-        page("Face ID", "faceid", height: 620, FaceIDSettingsView())
         page("Privacy", "hand.raised", height: 560, PrivacySettingsView())
 
         let window = NSWindow(contentViewController: tabs)
@@ -41,10 +43,5 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
-    }
-
-    /// Closing Settings never leaves the camera running.
-    func windowWillClose(_ notification: Notification) {
-        if services.faceID.cameraRunning { services.faceID.stopCamera() }
     }
 }

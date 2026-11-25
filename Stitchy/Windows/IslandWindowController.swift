@@ -23,9 +23,14 @@ final class IslandWindowController: NSObject {
     private var collapseTask: Task<Void, Never>?
     private var dragBaseline = NSPasteboard(name: .drag).changeCount
     private var isDragging = false
+    /// Recent horizontal drag direction changes, for shake-to-open.
+    private var shakeTurns: [TimeInterval] = []
+    private var lastDragX: CGFloat?
+    private var lastDragDirection: CGFloat = 0
     private(set) var isVisible = false
     /// Hidden because the frontmost app is in full screen (setting).
     private var hiddenForFullScreen = false
+    private let lockObserver = ScreenLockObserver()
 
     /// Extra slack around the island so tiny pointer jitter at the edge
     /// doesn't flicker between states (Settings › Hover sensitivity).
@@ -42,6 +47,7 @@ final class IslandWindowController: NSObject {
         host.sizingOptions = []
         panel.contentView = host
 
+        lockObserver.onChange = { [weak self] locked in self?.screenLockChanged(locked) }
         model.onExpansionChange = { [weak self] expanded, source in
             self?.expansionChanged(expanded, source: source)
         }
@@ -51,9 +57,12 @@ final class IslandWindowController: NSObject {
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         workspace.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(spaceChanged), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(spaceChanged),
+                                                            name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
         observeContinuously { [weak self] in
             guard let self else { return }
-            _ = (self.settings.topGap, self.settings.horizontalOffset, self.settings.display, self.settings.hideInFullScreen)
+            _ = (self.settings.topGap, self.settings.horizontalOffset, self.settings.display, self.settings.hideInFullScreen, self.settings.style)
             self.reposition()
             self.updateFullScreenVisibility()
         }
@@ -67,6 +76,19 @@ final class IslandWindowController: NSObject {
         reposition()
         panel.orderFrontRegardless()
         installMonitors()
+        if settings.lockScreenIsland { LockScreenPresenter.shared?.attach(panel) }
+    }
+
+    /// Locked: collapse, keep the island visible (lock-screen space), and let
+    /// it show only the lock-screen page. Unlocked: everything comes back.
+    private func screenLockChanged(_ locked: Bool) {
+        islandLog.info("screen \(locked ? "locked" : "unlocked", privacy: .public)")
+        model.collapse()
+        model.isScreenLocked = locked
+        if locked, settings.lockScreenIsland, isVisible {
+            hiddenForFullScreen = false
+            panel.orderFrontRegardless()
+        }
     }
 
     func hide() {
@@ -87,7 +109,9 @@ final class IslandWindowController: NSObject {
         x = min(max(x, full.minX), full.maxX - size.width)
         let frame = NSRect(
             x: x.rounded(),
-            y: (full.maxY - settings.topGap - size.height).rounded(),
+            // The floating island sits just below the menu bar line; the notch
+            // hangs from the very top.
+            y: (full.maxY - settings.topGap - (settings.style == .island ? islandFloat(screen) : 0) - size.height).rounded(),
             width: size.width, height: size.height
         )
         // The default notch height matches this display's menu bar.
@@ -95,6 +119,9 @@ final class IslandWindowController: NSObject {
         model.menuBarHeight = menuBar > 0 ? menuBar : max(NSStatusBar.system.thickness, 24)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
     }
+
+    /// Island style: float 6 pt below the top edge, like the iPhone island.
+    private func islandFloat(_ screen: NSScreen) -> CGFloat { 6 }
 
     @objc private func spaceChanged() {
         updateFullScreenVisibility()
@@ -123,7 +150,9 @@ final class IslandWindowController: NSObject {
     }
 
     private func frontmostIsFullScreen() -> Bool {
-        guard let screen, let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+        guard let screen, let front = NSWorkspace.shared.frontmostApplication,
+              front.bundleIdentifier != "com.apple.loginwindow",
+              case let pid = front.processIdentifier,
               pid != ProcessInfo.processInfo.processIdentifier,
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return false }
@@ -145,8 +174,8 @@ final class IslandWindowController: NSObject {
 
     /// The island's target shape in screen coordinates (bottom-left origin).
     private var islandRect: NSRect {
-        let mode = model.mode(hasLiveActivity: !services.compactActivities.isEmpty)
-        let size = model.geometry.size(mode, tab: model.tab)
+        let mode = services.islandMode
+        let size = services.islandSize(mode)
         let frame = panel.frame
         return NSRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height, width: size.width, height: size.height)
     }
@@ -275,7 +304,7 @@ final class IslandWindowController: NSObject {
     /// dragged". The drop target itself filters for file URLs. No
     /// pasteboard *contents* are read here.
     private func dragMoved() {
-        guard !hiddenForFullScreen else { return }
+        guard !hiddenForFullScreen, !model.isScreenLocked else { return }
         if !isDragging {
             guard NSPasteboard(name: .drag).changeCount != dragBaseline else { return }
             isDragging = true
@@ -284,6 +313,10 @@ final class IslandWindowController: NSObject {
         }
         guard settings.shelfEnabled else { return }
         let point = NSEvent.mouseLocation
+        if settings.shakeToShelf, !model.isExpanded, detectShake(point.x) {
+            model.expand(.drag, tab: .shelf)
+            Haptics.tap(settings.haptics)
+        }
         if dropZone.contains(point) {
             collapseTask?.cancel()
             setInteractive(true)
@@ -297,7 +330,30 @@ final class IslandWindowController: NSObject {
         }
     }
 
+    /// Shake = three quick left-right reversals of at least 25 pt within 0.7 s.
+    private func detectShake(_ x: CGFloat) -> Bool {
+        defer { lastDragX = x }
+        guard let last = lastDragX else { return false }
+        let dx = x - last
+        guard abs(dx) > 4 else { return false }
+        let direction: CGFloat = dx > 0 ? 1 : -1
+        let now = ProcessInfo.processInfo.systemUptime
+        if lastDragDirection != 0, direction != lastDragDirection, abs(dx) > 0 {
+            shakeTurns.append(now)
+        }
+        lastDragDirection = direction
+        shakeTurns.removeAll { now - $0 > 0.7 }
+        if shakeTurns.count >= 3 {
+            shakeTurns.removeAll()
+            return true
+        }
+        return false
+    }
+
     private func dragEnded() {
+        lastDragX = nil
+        shakeTurns.removeAll()
+        lastDragDirection = 0
         guard isDragging else { return }
         isDragging = false
         model.isFileDragActive = false

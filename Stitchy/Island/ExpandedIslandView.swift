@@ -8,7 +8,7 @@ struct ExpandedIslandView: View {
     var body: some View {
         let geometry = model.geometry
         VStack(spacing: IslandGeometry.headerSpacing) {
-            IslandHeader(tabs: visibleTabs)
+            IslandHeader(tabs: model.isScreenLocked ? [] : visibleTabs)
                 .frame(height: IslandGeometry.headerHeight)
             page
                 .id(currentTab)
@@ -27,29 +27,41 @@ struct ExpandedIslandView: View {
     private var visibleTabs: [IslandTab] {
         IslandTab.allCases.filter { tab in
             switch tab {
-            case .home, .activity, .calendar: true
+            case .home, .activity, .calendar, .weather: true
             case .music: settings.musicEnabled
             case .timer: settings.timerEnabled
             case .shelf: settings.shelfEnabled || settings.clipboardEnabled
             case .notes: settings.notesEnabled
             case .launcher: settings.launcherEnabled
+            case .tools: settings.toolsEnabled
             }
         }
     }
 
     private var currentTab: IslandTab {
-        visibleTabs.contains(model.tab) ? model.tab : .home
+        if model.isScreenLocked { return .music }
+        return visibleTabs.contains(model.tab) ? model.tab : .home
     }
 
     @ViewBuilder private var page: some View {
+        if model.isScreenLocked {
+            LockScreenPage()
+        } else {
+            unlockedPage
+        }
+    }
+
+    @ViewBuilder private var unlockedPage: some View {
         switch currentTab {
         case .home: DashboardView()
         case .music: MusicView()
         case .timer: TimersView()
+        case .weather: WeatherView()
         case .shelf: ShelfView()
         case .notes: PrivateGate { NotesView() }
         case .calendar: CalendarView()
         case .launcher: LauncherView()
+        case .tools: ToolsView()
         case .activity: ActivityView()
         }
     }
@@ -65,9 +77,19 @@ struct IslandHeader: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(tabs) { tab in
-                TabButton(tab: tab, isSelected: model.tab == tab, badge: tab == .activity && feed.unread > 0, namespace: selection) {
-                    model.select(tab)
+            // iOS 26-style floating tab bar: the tabs share one soft capsule.
+            HStack(spacing: 0) {
+                ForEach(tabs) { tab in
+                    TabButton(tab: tab, isSelected: model.tab == tab, badge: tab == .activity && feed.unread > 0, namespace: selection) {
+                        model.select(tab)
+                    }
+                }
+            }
+            .padding(2)
+            .background {
+                if !tabs.isEmpty {
+                    Capsule().fill(.white.opacity(0.06))
+                        .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
                 }
             }
             // Empty header space toggles the island closed (click-to-toggle).
@@ -84,13 +106,16 @@ struct IslandHeader: View {
                         .foregroundStyle(battery.snapshot.tint, .white.opacity(0.4))
                         .font(.system(size: 13))
                 }
+                .fixedSize()
                 .padding(.trailing, 6)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Battery \(battery.snapshot.percent) percent, \(battery.snapshot.statusText)")
             }
-            IconButton(symbol: "gearshape.fill", size: 11, diameter: 24, help: "Stitchy Settings") {
-                model.collapse()
-                model.openSettings()
+            if !model.isScreenLocked {
+                IconButton(symbol: "gearshape.fill", size: 11, diameter: 24, help: "Stitchy Settings") {
+                    model.collapse()
+                    model.openSettings()
+                }
             }
         }
     }
@@ -108,7 +133,7 @@ private struct TabButton: View {
         Button(action: action) {
             Image(systemName: tab.symbol)
                 .font(.system(size: 11.5, weight: .semibold))
-                .frame(width: 32, height: 26)
+                .frame(width: 30, height: 24)
                 .foregroundStyle(.white.opacity(isSelected ? 1 : hovering ? 0.8 : 0.42))
                 .background {
                     if isSelected {
@@ -122,7 +147,7 @@ private struct TabButton: View {
                 }
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plainHit)
         .onHover { hovering = $0 }
         .help(tab.title)
         .accessibilityLabel(tab.title)
@@ -154,7 +179,7 @@ struct Segmented<T: Hashable>: View {
                         }
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plainHit)
             }
         }
         .padding(2)
@@ -162,29 +187,44 @@ struct Segmented<T: Hashable>: View {
     }
 }
 
-/// Hides private content until unlocked with LocalAuthentication.
+/// Hides private content until unlocked with Touch ID or the password.
 struct PrivateGate<Content: View>: View {
     @ViewBuilder var content: Content
     @Environment(PrivateLock.self) private var lock
+    @State private var result: SystemAuth.Phase?
 
     var body: some View {
-        if lock.isLocked {
-            VStack(spacing: 8) {
-                Image(systemName: "lock.fill").font(.system(size: 22, weight: .medium)).foregroundStyle(Color.secondaryText)
-                Text("Private").font(.system(size: 14, weight: .semibold))
-                Text("Unlock with Touch ID or your password.")
-                    .font(.system(size: 11)).foregroundStyle(Color.secondaryText)
-                PillButton(title: "Unlock", symbol: "touchid", tint: .white, prominent: true) {
-                    Task { await lock.unlock() }
+        if lock.isLocked || result == .success {
+            VStack(spacing: 10) {
+                TouchIDGlyph(phase: lock.isUnlocking ? .scanning : result, size: 40)
+                    .frame(width: 64, height: 64)
+                Text(lock.isUnlocking ? (SystemAuth.hasTouchID ? "Touch the sensor" : "Enter your password") : "Private")
+                    .font(.system(size: 14, weight: .semibold))
+                    .contentTransition(.opacity)
+                if !lock.isUnlocking {
+                    PillButton(title: "Unlock", symbol: SystemAuth.hasTouchID ? "touchid" : "lock.open.fill",
+                               tint: .white, prominent: true) {
+                        Task { await unlock() }
+                    }
                 }
-                if let error = lock.lastError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.red.opacity(0.8)).lineLimit(1)
+                if let error = lock.lastError, !lock.isUnlocking {
+                    Text(error).font(.system(size: 10)).foregroundStyle(.red.opacity(0.85)).lineLimit(2).multilineTextAlignment(.center)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(Interaction.spring, value: lock.isUnlocking)
         } else {
             content
         }
+    }
+
+    private func unlock() async {
+        result = nil
+        await lock.unlock()
+        result = lock.isLocked ? .failed : .success
+        // Let the check mark land before revealing the content.
+        if result == .success { try? await Task.sleep(for: .milliseconds(550)) }
+        withAnimation(Interaction.spring) { result = nil }
     }
 }
 
@@ -208,5 +248,85 @@ private struct ShelfDropTarget: ViewModifier {
                 model.isDropTargeted = targeted && settings.shelfEnabled
             }
         }
+    }
+}
+
+/// What the island may show while the Mac is locked: Now Playing (with
+/// lyrics) and the time. No notes, clipboard, files, launcher or settings.
+struct LockScreenPage: View {
+    @Environment(NowPlayingService.self) private var music
+
+    var body: some View {
+        if music.track != nil {
+            MusicView()
+        } else {
+            clock
+        }
+    }
+
+    private var clock: some View {
+        TimelineView(.everyMinute) { context in
+            VStack(spacing: 4) {
+                Image(systemName: "lock.fill").foregroundStyle(Color.secondaryText)
+                Text(context.date, format: .dateTime.hour().minute())
+                    .font(.system(size: 40, weight: .semibold, design: .rounded))
+                Text("Unlock to use Stitchy").font(.system(size: 11)).foregroundStyle(Color.secondaryText)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// Animated Touch ID glyph: rings ripple out from the fingerprint and a
+/// highlight sweeps up it while macOS asks for Touch ID, then it morphs to
+/// a check or a cross. macOS reports no sensor events, so "scanning" covers
+/// the whole system prompt.
+struct TouchIDGlyph: View {
+    let phase: SystemAuth.Phase?
+    var size: CGFloat = 40
+    @State private var animate = false
+
+    private var look: (symbol: String, tint: Color) {
+        switch phase {
+        case .success: ("checkmark.circle.fill", .green)
+        case .failed: ("xmark.circle.fill", .red)
+        default: (SystemAuth.hasTouchID ? "touchid" : "lock.fill", phase == .scanning ? .pink : .white.opacity(0.85))
+        }
+    }
+
+    var body: some View {
+        let scanning = phase == .scanning
+        ZStack {
+            if scanning {
+                ForEach(0..<2, id: \.self) { i in
+                    Circle()
+                        .stroke(Color.pink.opacity(0.5), lineWidth: 1.5)
+                        .scaleEffect(animate ? 1.55 : 0.75)
+                        .opacity(animate ? 0 : 0.9)
+                        .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false).delay(Double(i) * 0.7), value: animate)
+                }
+            }
+            Image(systemName: look.symbol)
+                .font(.system(size: size, weight: .regular))
+                .foregroundStyle(look.tint)
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: scanning)
+                .overlay {
+                    if scanning {
+                        // A soft highlight sweeping up the fingerprint.
+                        LinearGradient(colors: [.clear, .white.opacity(0.85), .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: size * 0.3)
+                            .offset(y: animate ? -size * 0.5 : size * 0.5)
+                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animate)
+                            .mask(Image(systemName: look.symbol).font(.system(size: size)))
+                            .allowsHitTesting(false)
+                    }
+                }
+                .scaleEffect(phase == .success ? 1.08 : 1)
+        }
+        .frame(width: size * 1.6, height: size * 1.6)
+        .animation(.spring(response: 0.4, dampingFraction: 0.65), value: phase)
+        .onAppear { animate = true }
+        .accessibilityLabel(phase == .scanning ? "Waiting for Touch ID" : phase == .success ? "Unlocked" : "Locked")
     }
 }

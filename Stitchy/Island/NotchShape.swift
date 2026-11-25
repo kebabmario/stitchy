@@ -6,13 +6,21 @@ import SwiftUI
 struct NotchShape: Shape {
     var shoulder: CGFloat
     var bottomRadius: CGFloat
+    /// Convex top corners (Dynamic Island style). Used when shoulder is 0.
+    var topRadius: CGFloat = 0
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(shoulder, bottomRadius) }
-        set { shoulder = newValue.first; bottomRadius = newValue.second }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(shoulder, bottomRadius), topRadius) }
+        set { shoulder = newValue.first.first; bottomRadius = newValue.first.second; topRadius = newValue.second }
     }
 
     func path(in rect: CGRect) -> Path {
+        if topRadius > 0.5, shoulder < 0.5 {
+            // Floating island: a continuous rounded rectangle / capsule.
+            let r = RectangleCornerRadii(topLeading: min(topRadius, rect.height / 2), bottomLeading: min(bottomRadius, rect.height / 2),
+                                         bottomTrailing: min(bottomRadius, rect.height / 2), topTrailing: min(topRadius, rect.height / 2))
+            return UnevenRoundedRectangle(cornerRadii: r, style: .continuous).path(in: rect)
+        }
         let s = min(shoulder, rect.width / 4, rect.height / 2)
         let b = min(bottomRadius, (rect.width - 2 * s) / 2, rect.height - s)
         // 0.55 ≈ circular; a little more gives a softer, "continuous" corner.

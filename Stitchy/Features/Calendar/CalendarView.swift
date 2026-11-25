@@ -8,17 +8,26 @@ struct CalendarView: View {
         if calendar.access != .granted || !settings.calendarEnabled {
             connect
         } else if calendar.events.isEmpty {
-            VStack(spacing: 6) {
-                Image(systemName: "calendar.badge.checkmark").font(.system(size: 22)).foregroundStyle(Color.secondaryText)
-                Text("Nothing else today or tomorrow").font(.system(size: 13, weight: .semibold))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            EmptyState(symbol: "calendar.badge.checkmark", tint: .red, title: "All clear",
+                       message: "Nothing else today or tomorrow.")
+                .onAppear { calendar.refresh() }
         } else {
-            HStack(alignment: .top, spacing: 18) {
-                if let next = calendar.nextTimed { countdown(next).frame(width: 150, alignment: .leading) }
+            HStack(alignment: .top, spacing: DS.Space.m) {
+                if let next = calendar.nextTimed {
+                    countdown(next).frame(width: 156, alignment: .leading).well(padding: 12)
+                }
                 IslandScroll(axis: .vertical) {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(calendar.events) { EventRow(event: $0) }
+                        let today = calendar.events.filter { Calendar.current.isDateInToday($0.start) }
+                        let later = calendar.events.filter { !Calendar.current.isDateInToday($0.start) }
+                        if !today.isEmpty {
+                            SectionLabel("Today")
+                            ForEach(today) { EventRow(event: $0) }
+                        }
+                        if !later.isEmpty {
+                            SectionLabel("Tomorrow").padding(.top, today.isEmpty ? 0 : 4)
+                            ForEach(later) { EventRow(event: $0) }
+                        }
                     }
                 }
             }
@@ -30,12 +39,12 @@ struct CalendarView: View {
         TimelineView(.periodic(from: .timelineAnchor, by: 30)) { context in
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.start <= context.date ? "NOW" : "NEXT")
-                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(event.color)
+                    .font(DS.label).tracking(0.8).foregroundStyle(event.color)
                 Text(event.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
                 Text(event.start <= context.date
                      ? "Ends \(event.end.formatted(date: .omitted, time: .shortened))"
                      : "in " + Self.until(event.start, from: context.date))
-                    .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(DS.numerals(22))
                 if let location = event.location, !location.isEmpty {
                     Label(location, systemImage: "mappin").font(.system(size: 10)).foregroundStyle(Color.secondaryText).lineLimit(1)
                 }
@@ -49,19 +58,17 @@ struct CalendarView: View {
     }
 
     private var connect: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "calendar").font(.system(size: 22, weight: .medium)).foregroundStyle(Color.secondaryText)
-            Text("Today's Schedule").font(.system(size: 13, weight: .semibold))
+        Group {
             if calendar.access == .denied {
-                Text("Calendar access was denied.").font(.system(size: 11)).foregroundStyle(Color.secondaryText)
-                PillButton(title: "Open Privacy Settings") { SystemSettingsLink.open(SystemSettingsLink.calendars) }
+                EmptyState(symbol: "calendar", tint: .red, title: "Calendar access is off",
+                           message: "Allow Stitchy in Privacy & Security › Calendars to see today's schedule.",
+                           actionTitle: "Open Privacy Settings") { SystemSettingsLink.open(SystemSettingsLink.calendars) }
             } else {
-                Text("Show upcoming events and get a reminder before meetings. Events are read on this Mac only.")
-                    .font(.system(size: 11)).foregroundStyle(Color.secondaryText).multilineTextAlignment(.center).frame(maxWidth: 320)
-                PillButton(title: "Connect Calendar", tint: .white, prominent: true) { Task { await calendar.requestAccess() } }
+                EmptyState(symbol: "calendar", tint: .red, title: "Today's schedule",
+                           message: "Upcoming events and a reminder before meetings. Events are read on this Mac only.",
+                           actionTitle: "Connect Calendar") { Task { await calendar.requestAccess() } }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -72,14 +79,11 @@ private struct EventRow: View {
         HStack(spacing: 8) {
             Capsule().fill(event.color).frame(width: 3, height: 26)
             VStack(alignment: .leading, spacing: 1) {
-                Text(event.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text(event.title).font(DS.body.weight(.semibold)).lineLimit(1)
                 Text(event.isAllDay ? "All day" : "\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened))")
-                    .font(.system(size: 10)).foregroundStyle(Color.secondaryText)
+                    .font(DS.caption).foregroundStyle(Color.secondaryText)
             }
             Spacer(minLength: 0)
-            if !Calendar.current.isDateInToday(event.start) {
-                Text("Tomorrow").font(.system(size: 9.5, weight: .medium)).foregroundStyle(Color.tertiaryText)
-            }
         }
     }
 }

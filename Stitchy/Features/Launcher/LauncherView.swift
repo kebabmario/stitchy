@@ -34,9 +34,9 @@ struct LauncherView: View {
                     Text("Add apps, folders and Shortcuts in Settings › Launcher.")
                 }
                 Spacer()
-                Text("↩ to open").foregroundStyle(Color.tertiaryText)
+                Text("↩ open  ·  ↑↓ choose  ·  type 12*7 or todo …").foregroundStyle(Color.tertiaryText)
             }
-            .font(.system(size: 10)).foregroundStyle(Color.tertiaryText)
+            .font(DS.caption).foregroundStyle(Color.tertiaryText)
         }
     }
 
@@ -57,12 +57,12 @@ private struct ResultRow: View {
     var body: some View {
         HStack(spacing: 9) {
             icon.frame(width: 22, height: 22)
-            Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Text(title).font(DS.body).lineLimit(1)
             Spacer()
-            Text(kind).font(.system(size: 10)).foregroundStyle(Color.tertiaryText)
+            Text(kind).font(DS.caption).foregroundStyle(Color.tertiaryText)
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(highlighted ? 0.14 : hovering ? 0.07 : 0)))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(highlighted ? 0.13 : hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
@@ -88,9 +88,9 @@ private struct ResultRow: View {
         case .item(let i) where i.kind != .shortcut:
             Image(nsImage: NSWorkspace.shared.icon(forFile: i.target)).resizable()
         case .item:
-            Image(systemName: "square.2.layers.3d.fill").foregroundStyle(.pink)
+            CardIconView(icon: .symbol("square.2.layers.3d.fill", .pink), size: 22)
         case .action(let a):
-            Image(systemName: a.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
+            CardIconView(icon: .symbol(a.symbol, a.id == "calc" ? .orange : .indigo), size: 22)
         case .app(let u):
             Image(nsImage: NSWorkspace.shared.icon(forFile: u.path)).resizable()
         }

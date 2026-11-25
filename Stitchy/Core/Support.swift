@@ -66,9 +66,15 @@ enum SystemSettingsLink {
     static let automation = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
     static let filesAndFolders = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!
     static let notifications = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+    static let focus = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FocusStatus")!
+    static let accessibility = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
     static let calendars = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!
     static let camera = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
     static let pasteboard = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!
+    static let screenRecording = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+    static let microphone = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+    static let speech = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!
+    static let bluetooth = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth")!
     static let loginItems = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
 
     @MainActor
@@ -127,7 +133,17 @@ extension View {
             .environment(s.timers).environment(s.shelf).environment(s.downloads)
             .environment(s.notifier).environment(s.clipboard).environment(s.audio)
             .environment(s.privacy).environment(s.notes).environment(s.calendar)
-            .environment(s.aiUsage).environment(s.launcher).environment(s.faceID)
-            .environment(s.privateLock)
+            .environment(s.aiUsage).environment(s.launcher)
+            .environment(s.privateLock).environment(s.gate).environment(s.appleNotes)
+            .environment(s.bluetooth).environment(s.drives).environment(s.controls).environment(s.lyrics)
+            .environment(s.weather).environment(s.focus).environment(s.mirror).environment(s.queue).environment(s.mixer).environment(s.capture).environment(s.agents).environment(s.dictation)
     }
+}
+
+/// Thread-safe one-shot flag.
+final class OSAllocatedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    /// Returns true the first time only.
+    func set() -> Bool { lock.withLock { defer { value = true }; return !value } }
 }

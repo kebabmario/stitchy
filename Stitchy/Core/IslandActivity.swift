@@ -12,6 +12,12 @@ struct IslandActivity: Identifiable {
         case download(DownloadsMonitor.Download)
         case airDrop(Int)
         case music
+        case keepAwake
+        case micMuted
+        case weather
+        case focus
+        case call
+        case agent(String)
     }
 
     let id: String
@@ -80,11 +86,63 @@ extension AppServices {
                 }
             }
         }
+        if let call = mirror.activeCall {
+            list.append(.init(id: "call", kind: .call, priority: IslandActivity.Priority.privacy + 2, symbol: "phone.fill",
+                              tint: .green, title: call.title, tab: .home))
+        }
+        if settings.agentActivityEnabled, let session = agents.live {
+            list.append(.init(id: "agent", kind: .agent(session.status), priority: 50,
+                              symbol: session.agent == .claude ? "sparkle" : "chevron.left.forwardslash.chevron.right", tint: .orange,
+                              title: session.project.isEmpty ? session.agent.rawValue : "\(session.agent.rawValue) · \(session.project)",
+                              tab: .activity))
+        }
+        if focus.isFocused == true {
+            list.append(.init(id: "focus", kind: .focus, priority: 20, symbol: "moon.fill", tint: .indigo, title: "Focus", tab: .home))
+        }
+        if controls.isKeepingAwake {
+            list.append(.init(id: "awake", kind: .keepAwake, priority: 30, symbol: "cup.and.saucer.fill",
+                              tint: .yellow, title: "Keeping Awake", tab: .home))
+        }
+        if controls.micMuted {
+            list.append(.init(id: "micmuted", kind: .micMuted, priority: IslandActivity.Priority.privacy - 1, symbol: "mic.slash.fill",
+                              tint: .red, title: "Microphone Muted", tab: .home))
+        }
         if settings.musicEnabled, settings.showMusicActivity, nowPlaying.isPlaying {
             list.append(.init(id: "music", kind: .music, priority: IslandActivity.Priority.music,
                               symbol: "music.note", tint: nowPlaying.accent, title: nowPlaying.track?.title ?? "Music", tab: .music))
         }
+        // Weather only fills an otherwise idle island, and only if asked for.
+        if list.isEmpty, settings.weatherEnabled, settings.compactWeather, let c = weather.current {
+            list.append(.init(id: "weather", kind: .weather, priority: 1,
+                              symbol: WeatherService.describe(c.code, isDay: c.isDay).symbol, tint: .cyan, title: "Weather", tab: .weather))
+        }
         return list.sorted { $0.priority > $1.priority }
+    }
+
+    /// The island's size for `mode`. Music only needs its cover and visualizer
+    /// beside the notch, so its live island is narrower than other activities'.
+    func islandSize(_ mode: IslandGeometry.Mode) -> CGSize {
+        let geometry = island.geometry
+        var size = geometry.size(mode, tab: island.tab)
+        if case .music = compactActivities.first?.kind {
+            switch mode {
+            case .live: size.width = geometry.compact.width + 76
+            case .liveLyrics: size.width = geometry.compact.width + 130
+            default: break
+            }
+        }
+        return size
+    }
+
+    /// The island's current mode; shared by the view and hit-testing.
+    var islandMode: IslandGeometry.Mode {
+        let live = compactActivities
+        let lyricStrip: Bool = {
+            guard settings.lyricsEnabled, settings.compactLyrics, case .music = live.first?.kind,
+                  case .synced = lyrics.state else { return false }
+            return true
+        }()
+        return island.mode(hasLiveActivity: !live.isEmpty, lyricStrip: lyricStrip)
     }
 
     /// What the compact island shows (respects the master switch).

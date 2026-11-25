@@ -1,3 +1,6 @@
+import ApplicationServices
+import Speech
+import CoreBluetooth
 import AVFoundation
 import ServiceManagement
 import SwiftUI
@@ -11,6 +14,7 @@ struct GeneralSettingsView: View {
     @State private var loginStatus = LaunchAtLogin.status
     @State private var loginError: String?
     @State private var confirmReset = false
+    @Environment(SensitiveGate.self) private var gate
 
     var body: some View {
         @Bindable var settings = settings
@@ -59,7 +63,9 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .onAppear { loginStatus = LaunchAtLogin.status }
         .confirmationDialog("Reset all Stitchy settings?", isPresented: $confirmReset) {
-            Button("Reset", role: .destructive) { settings.reset() }
+            Button("Reset", role: .destructive) {
+                Task { if await gate.authorize("reset all Stitchy settings") { settings.reset() } }
+            }
         } message: {
             Text("Notes, focus history, launcher items and files on your shelf are kept.")
         }
@@ -76,6 +82,10 @@ struct IslandSettingsView: View {
         @Bindable var settings = settings
         Form {
             Section("Appearance") {
+                Picker("Style", selection: $settings.style) {
+                    ForEach(IslandStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
                 slider("Notch width", $settings.notchWidth, 150...280, "pt")
                 Toggle("Match menu bar height", isOn: Binding(
                     get: { settings.notchHeight == 0 },
@@ -87,6 +97,9 @@ struct IslandSettingsView: View {
                 slider("Expanded width", $settings.expandedWidth, 420...560, "pt")
                 slider("Distance from top", $settings.topGap, 0...40, "pt")
                 slider("Horizontal offset", $settings.horizontalOffset, -300...300, "pt")
+                Toggle("Show on the Lock Screen", isOn: $settings.lockScreenIsland)
+                Text("Uses private macOS window-server APIs (adapted from SkyLightWindow, MIT). While locked, the island shows only Now Playing, lyrics and the time: no notes, clipboard, files or settings. Turning this off takes effect after restarting Stitchy. A future macOS update may break it; Stitchy then just hides it.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Toggle("Hide when an app is in full screen", isOn: $settings.hideInFullScreen)
                     Spacer()
@@ -142,23 +155,43 @@ struct FeaturesSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("Features") {
-                feature("Music", "music.note", .pink, "Apple Music and Spotify.", $settings.musicEnabled)
-                feature("Timers", "timer", .orange, "Countdowns, stopwatch and Focus sessions.", $settings.timerEnabled)
-                feature("File Shelf", "tray.full.fill", .teal, "Drag files onto the island to hold them.", $settings.shelfEnabled)
-                feature("Quick Notes", "note.text", .yellow, "Notes saved on this Mac.", $settings.notesEnabled)
-                feature("Launcher", "magnifyingglass", .indigo, "Search apps, folders, Shortcuts and actions.", $settings.launcherEnabled)
+            Section("Island & Alerts") {
+                feature("Live Alerts & Activity Feed", "bell.fill", .red, "Short alerts in the island and a history feed.", $settings.alertsEnabled)
                 feature("Calendar", "calendar", .red, "Today's schedule and meeting reminders. Needs calendar access.", Binding(
                     get: { settings.calendarEnabled },
                     set: { on in
                         if on, calendar.access != .granted { Task { await calendar.requestAccess() } } else { settings.calendarEnabled = on }
                     }))
-                feature("Downloads", "arrow.down.circle.fill", .blue, "Watches ~/Downloads. macOS asks for folder access.", $settings.downloadsEnabled)
                 feature("Battery", "battery.100percent", .green, "Charge level, charging and low-battery alerts.", $settings.batteryEnabled)
-                feature("System HUD", "speaker.wave.2.fill", .gray, "Volume, mute and audio output changes.", $settings.hudEnabled)
                 feature("Camera Guard", "video.fill", .green, "Shows when the camera or microphone is in use.", $settings.privacyGuardEnabled)
+            }
+            Section("Media") {
+                feature("Music", "music.note", .pink, "Apple Music and Spotify.", $settings.musicEnabled)
+                feature("System HUD", "speaker.wave.2.fill", .gray, "Volume, mute and audio output changes.", $settings.hudEnabled)
+            }
+            Section("Files & Productivity") {
+                feature("File Shelf", "tray.full.fill", .teal, "Drag files onto the island to hold them.", $settings.shelfEnabled)
+                feature("Shake to Open Shelf", "hand.draw.fill", .teal, "While dragging a file, shake it to open the shelf.", $settings.shakeToShelf)
+                feature("Downloads", "arrow.down.circle.fill", .blue, "Watches ~/Downloads. macOS asks for folder access.", $settings.downloadsEnabled)
+                feature("Notes", "note.text", .yellow, "Your Apple Notes in the island: browse, search, create, open.", $settings.notesEnabled)
+                feature("Timers", "timer", .orange, "Countdowns, stopwatch and Focus sessions.", $settings.timerEnabled)
+                feature("Launcher", "magnifyingglass", .indigo, "Search apps, folders, Shortcuts and actions.", $settings.launcherEnabled)
+                feature("Tools", "wrench.and.screwdriver.fill", .gray, "Calculator with history, and developer tools (JSON, Base64, hashes, JWT, QR…).", $settings.toolsEnabled)
+                feature("Break Reminders", "figure.walk", .mint, "After a stretch of active use: rest your eyes, move, drink, breathe. Quiet during calls; idle time resets it.", $settings.breakReminders)
+                if settings.breakReminders {
+                    Stepper("Every \(Int(settings.breakMinutes)) minutes", value: $settings.breakMinutes, in: 20...120, step: 5)
+                }
+            }
+            Section("System") {
+                feature("Bluetooth Devices", "airpods", .blue, "Shows AirPods, keyboards and other devices connecting. macOS asks for Bluetooth access.", $settings.bluetoothEnabled)
+                feature("Drives", "externaldrive.fill", .gray, "USB and SD drives appear with one-tap Eject.", $settings.drivesEnabled)
+                feature("Window Snapping", "rectangle.split.2x1", .orange, "⌃⌥ ←→↑↓ halves · ⌃⌥ U I J K quarters · ⌃⌥ D F G thirds · ⌃⌥ E T two-thirds · ⌃⌥↩ maximize · ⌃⌥C center · ⌃⌥⌘→ next display. Needs Accessibility.", $settings.windowSnapEnabled)
+                feature("Dock Window Previews", "dock.rectangle", .blue, "Hover an app in the Dock to see its windows; click one to switch. Needs Accessibility and Screen Recording.", $settings.dockPreviewsEnabled)
+            }
+            Section("Developer") {
+                feature("Xcode Build Alerts", "hammer.fill", .blue, "An alert when an Xcode or xcodebuild build finishes: scheme, time, errors. Reads DerivedData logs only.", $settings.xcodeBuildAlerts)
+                feature("Coding Agent Activity", "sparkle", .orange, "Live Claude Code and Codex status, and an alert when they finish. Reads their local session logs; shows only the tool and file name.", $settings.agentActivityEnabled)
                 feature("AI Usage", "sparkle", .orange, "Claude Code and Codex usage from local logs.", $settings.aiUsageEnabled)
-                feature("Live Alerts & Activity Feed", "bell.fill", .red, "Short alerts in the island and a history feed.", $settings.alertsEnabled)
             }
             Section {
                 Toggle("Show live activities in the compact island", isOn: $settings.compactActivities)
@@ -174,8 +207,15 @@ struct FeaturesSettingsView: View {
             Section("Music") {
                 Toggle("Show an alert when the track changes", isOn: $settings.trackChangeAlerts)
                 Toggle("Artwork, progress and controls (Automation)", isOn: $settings.musicControlsEnabled)
+                Toggle("Synced lyrics", isOn: $settings.lyricsEnabled)
+                Toggle("Show the current line in the compact island", isOn: $settings.compactLyrics).disabled(!settings.lyricsEnabled)
+                Text("Lyrics come from LRCLIB (lrclib.net), a free public database: Stitchy sends the song's title, artist, album and length, once per song (results are cached). Spotify doesn't share lyrics with other apps. Lyrics stored with Apple Music tracks are used when LRCLIB has none.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Focus") {
+            SpotifySettings()
+            WeatherFocusSettings()
+            CommunicationSettings()
+            Section("Pomodoro") {
                 stepper("Focus", $settings.focusMinutes, 5...90)
                 stepper("Short break", $settings.shortBreakMinutes, 1...30)
                 stepper("Long break", $settings.longBreakMinutes, 5...60)
@@ -247,6 +287,7 @@ struct ClipboardSettingsView: View {
             }
             Section("File Shelf") {
                 Toggle("Show file previews", isOn: $settings.shelfPreviews)
+                Toggle("Put new screenshots on the Shelf", isOn: $settings.screenshotsToShelf)
                 Text("The shelf only keeps references. Removing items or clearing the shelf never touches files on disk.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -355,140 +396,70 @@ private struct ShortcutPicker: View {
     }
 }
 
-// MARK: - Face ID
-
-struct FaceIDSettingsView: View {
-    @Environment(AppSettings.self) private var settings
-    @Environment(FaceIDService.self) private var faceID
-    @State private var confirmDelete = false
-
-    var body: some View {
-        @Bindable var settings = settings
-        Form {
-            Section {
-                Toggle("Enable Stitchy Face ID", isOn: $settings.faceIDEnabled)
-            } footer: {
-                Text("A camera-based presence check that runs entirely on this Mac. It is not Apple Face ID: a regular webcam has no depth sensing, so a photo or a look-alike can fool it. It never unlocks your Mac, types passwords or protects anything. Private sections use Touch ID or your password instead.")
-            }
-            if settings.faceIDEnabled {
-                Section("1 · Camera Access") {
-                    HStack {
-                        Label(cameraText, systemImage: faceID.cameraStatus == .authorized ? "checkmark.circle.fill" : "camera")
-                            .foregroundStyle(faceID.cameraStatus == .authorized ? .green : .primary)
-                        Spacer()
-                        if faceID.cameraStatus == .notDetermined {
-                            Button("Allow Camera…") { Task { await faceID.requestCamera() } }
-                        } else if faceID.cameraStatus == .denied || faceID.cameraStatus == .restricted {
-                            Button("Open Privacy Settings") { SystemSettingsLink.open(SystemSettingsLink.camera) }
-                        }
-                    }
-                    Text("The camera only turns on while you enroll or run a check, and the green camera light is always on while it runs. Frames are analysed in memory and discarded; only numeric face descriptors are saved, in your Keychain.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("2 · Enroll") {
-                    CameraPreview(session: faceID.session, active: faceID.cameraRunning)
-                        .frame(height: 170)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(alignment: .topLeading) { cameraBadge.padding(8) }
-                    HStack {
-                        Button(faceID.isEnrolled ? "Re-enroll" : "Enroll My Face") { Task { await faceID.enroll() } }
-                            .disabled(faceID.cameraStatus != .authorized || faceID.cameraRunning)
-                        Button("Check Now") { Task { await faceID.check() } }
-                            .disabled(!faceID.isEnrolled || faceID.cameraRunning)
-                        Spacer()
-                        Text(phaseText).foregroundStyle(.secondary).font(.callout)
-                    }
-                    if case .enrolling(let progress) = faceID.phase { ProgressView(value: progress) }
-                }
-                Section("3 · Manage") {
-                    LabeledContent("Enrollment", value: faceID.isEnrolled ? "Saved in Keychain" : "None")
-                    Button("Delete Face Data…", role: .destructive) { confirmDelete = true }.disabled(!faceID.isEnrolled)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .confirmationDialog("Delete Stitchy Face ID data?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { faceID.deleteEnrollment() }
-        } message: {
-            Text("Removes the saved face descriptors from your Keychain. This can't be undone.")
-        }
-    }
-
-    private var cameraText: String {
-        switch faceID.cameraStatus {
-        case .authorized: "Camera allowed"
-        case .denied: "Camera access denied"
-        case .restricted: "Camera restricted"
-        default: "Not requested yet"
-        }
-    }
-
-    private var cameraBadge: some View {
-        HStack(spacing: 5) {
-            Circle().fill(faceID.cameraRunning ? .green : .gray).frame(width: 7, height: 7)
-            Text(faceID.cameraRunning ? (faceID.faceVisible ? "Camera on · face found" : "Camera on") : "Camera off")
-        }
-        .font(.caption.weight(.semibold))
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(.black.opacity(0.6), in: Capsule())
-        .foregroundStyle(.white)
-    }
-
-    private var phaseText: String {
-        switch faceID.phase {
-        case .idle: ""
-        case .enrolling: "Look at the camera…"
-        case .checking: "Checking…"
-        case .finished(let s), .failed(let s): s
-        }
-    }
-}
-
-/// Live camera preview (AVCaptureVideoPreviewLayer). Shows black when off.
-struct CameraPreview: NSViewRepresentable {
-    let session: AVCaptureSession
-    let active: Bool
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.black.cgColor
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        view.layer?.addSublayer(preview)
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        view.layer?.sublayers?.first?.frame = view.bounds
-        view.layer?.sublayers?.first?.opacity = active ? 1 : 0
-    }
-}
-
 // MARK: - Privacy
 
+/// Live permission states for the overview. Each check is a silent status read; none prompts.
+@MainActor
+enum PermissionStatus {
+    static var accessibility: (String, Color) { AXIsProcessTrusted() ? ("Allowed", .green) : ("Not allowed", .secondary) }
+    static var screenRecording: (String, Color) { CGPreflightScreenCaptureAccess() ? ("Allowed", .green) : ("Not allowed", .secondary) }
+    static func av(_ type: AVMediaType) -> (String, Color) {
+        switch AVCaptureDevice.authorizationStatus(for: type) {
+        case .authorized: ("Allowed", .green)
+        case .denied, .restricted: ("Denied", .red)
+        default: ("Not requested", .secondary)
+        }
+    }
+    static var camera: (String, Color) { av(.video) }
+    static var microphone: (String, Color) { av(.audio) }
+    static var speech: (String, Color) {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: ("Allowed", .green)
+        case .denied, .restricted: ("Denied", .red)
+        default: ("Not requested", .secondary)
+        }
+    }
+    static var bluetooth: (String, Color) {
+        switch CBManager.authorization {
+        case .allowedAlways: ("Allowed", .green)
+        case .denied, .restricted: ("Denied", .red)
+        default: ("Not requested", .secondary)
+        }
+    }
+}
+
 struct PrivacySettingsView: View {
+    /// Bumped when Stitchy becomes active again, so statuses changed in System Settings show up.
+    @State private var refresh = 0
     @Environment(NowPlayingService.self) private var music
     @Environment(SystemNotifier.self) private var notifier
     @Environment(DownloadsMonitor.self) private var downloads
     @Environment(CalendarService.self) private var calendar
-    @Environment(FaceIDService.self) private var faceID
     @Environment(AppSettings.self) private var settings
     @Environment(PrivateLock.self) private var lock
+    @Environment(SensitiveGate.self) private var gate
 
     var body: some View {
         @Bindable var settings = settings
         Form {
             Section {
-                Toggle("Lock Notes and Clipboard behind Touch ID / password", isOn: $settings.privateSectionsLocked)
+                Toggle("Lock Notes and Clipboard", isOn: Binding(
+                    get: { settings.privateSectionsLocked },
+                    set: { on in Task { await lock.setLocking(on) } }))
                 if settings.privateSectionsLocked {
                     Button("Lock Now") { lock.lock() }
                 }
+                Toggle("Require Authentication for Sensitive Actions", isOn: Binding(
+                    get: { settings.requireAuthForSensitive },
+                    set: { on in Task { await gate.setRequireSensitive(on) } }))
+                LabeledContent("macOS authentication", value: SystemAuth.biometryDescription)
+                if let error = gate.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                }
             } header: {
-                Text("Private Sections")
+                Text("Touch ID")
             } footer: {
-                Text("Uses LocalAuthentication. Unlocking lasts 5 minutes.")
+                Text("Private sections unlock with Touch ID or your password for 5 minutes. With sensitive-action protection on, turning the lock off or resetting settings asks first. The island animates while macOS waits for your finger. Stitchy never sees or types your password.")
             }
             Section {
                 row("Notifications", "Timer, focus and reminder alerts", notificationStatus) {
@@ -500,8 +471,27 @@ struct PrivacySettingsView: View {
                 row("Calendars", "Today's schedule and reminders", calendarStatus) {
                     if calendar.access == .unknown { Task { await calendar.requestAccess() } } else { SystemSettingsLink.open(SystemSettingsLink.calendars) }
                 }
-                row("Camera", "Stitchy Face ID only", cameraStatus) {
-                    if faceID.cameraStatus == .notDetermined { Task { await faceID.requestCamera() } } else { SystemSettingsLink.open(SystemSettingsLink.camera) }
+                let _ = refresh
+                row("Accessibility", "Calls & Messages, Dock previews, window snapping", PermissionStatus.accessibility) {
+                    SystemSettingsLink.open(SystemSettingsLink.accessibility)
+                }
+                row("Screen Recording", "Screen text capture, annotation, Dock previews", PermissionStatus.screenRecording) {
+                    SystemSettingsLink.open(SystemSettingsLink.screenRecording)
+                }
+                row("Camera", "Camera Mirror, only while it's open", PermissionStatus.camera) {
+                    SystemSettingsLink.open(SystemSettingsLink.camera)
+                }
+                row("Microphone", "Dictation, only while you dictate", PermissionStatus.microphone) {
+                    SystemSettingsLink.open(SystemSettingsLink.microphone)
+                }
+                row("Speech Recognition", "Dictation", PermissionStatus.speech) {
+                    SystemSettingsLink.open(SystemSettingsLink.speech)
+                }
+                row("Bluetooth", "Connected-device alerts", PermissionStatus.bluetooth) {
+                    SystemSettingsLink.open(SystemSettingsLink.bluetooth)
+                }
+                row("System Audio", "App Volume (asked the first time you lower an app)", ("Asked when used", .secondary)) {
+                    SystemSettingsLink.open(SystemSettingsLink.screenRecording)
                 }
                 row("Downloads Folder", "Download progress", downloadsStatus) {
                     if settings.downloadsEnabled { SystemSettingsLink.open(SystemSettingsLink.filesAndFolders) } else { settings.downloadsEnabled = true }
@@ -514,8 +504,13 @@ struct PrivacySettingsView: View {
             } footer: {
                 Text("Each permission is requested only when you first use the feature that needs it.")
             }
+            Section("Network Services") {
+                LabeledContent("Lyrics (LRCLIB)", value: settings.lyricsEnabled ? "On: title, artist, album, length" : "Off")
+                LabeledContent("Weather (Open-Meteo)", value: settings.weatherEnabled ? "On: rounded coordinates of your place" : "Off")
+                Text("Nothing else leaves your Mac. No accounts, no analytics.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("Not Required") {
-                Text("Stitchy never asks for Accessibility, Input Monitoring, Screen Recording, Location or Full Disk Access. It can't read other apps' notifications or know which app uses the camera, because macOS doesn't allow that. Incoming phone and FaceTime calls aren't shown: macOS has no public API for observing them.")
+                Text("Stitchy asks for Accessibility only for Calls & Messages or Dock Window Previews, Screen Recording only for Dock Window Previews, and audio capture only when you lower an app's volume. It never asks for Input Monitoring, Location or Full Disk Access. It can't read other apps' notifications or know which app uses the camera, because macOS doesn't allow that. Incoming phone and FaceTime calls aren't shown: macOS has no public API for observing them.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -524,6 +519,7 @@ struct PrivacySettingsView: View {
             notifier.refreshStatus()
             await music.refreshPermission()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh += 1 }
     }
 
     private var notificationStatus: (String, Color) {
@@ -551,14 +547,6 @@ struct PrivacySettingsView: View {
         }
     }
 
-    private var cameraStatus: (String, Color) {
-        switch faceID.cameraStatus {
-        case .authorized: ("Allowed", .green)
-        case .denied, .restricted: ("Denied", .red)
-        default: ("Not requested", .secondary)
-        }
-    }
-
     private var downloadsStatus: (String, Color) {
         if !settings.downloadsEnabled { return ("Off", .secondary) }
         return downloads.accessDenied ? ("Denied", .red) : ("Allowed", .green)
@@ -573,6 +561,133 @@ struct PrivacySettingsView: View {
             Spacer()
             Text(status.0).foregroundStyle(status.1).font(.callout)
             Button("Manage…", action: action)
+        }
+    }
+}
+
+struct WeatherFocusSettings: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(FocusService.self) private var focus
+    @Environment(Launcher.self) private var launcher
+
+    var body: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Weather", isOn: $settings.weatherEnabled)
+            Toggle("Use °F and mph", isOn: $settings.weatherFahrenheit)
+            Toggle("Alert when rain is likely in the next hour", isOn: $settings.weatherAlerts)
+            Toggle("Show temperature in the idle island", isOn: $settings.compactWeather)
+        } header: {
+            Text("Weather")
+        } footer: {
+            Text("Forecasts from Open-Meteo (free, no account). Choose your place in the Weather tab: your location once, or a city. Open-Meteo has no severe-weather alerts.")
+        }
+        Section {
+            HStack {
+                Text("Focus status")
+                Spacer()
+                switch focus.access {
+                case .authorized: Text(focus.isFocused == true ? "A Focus is on" : "No Focus").foregroundStyle(.secondary)
+                case .denied: Button("Open Privacy Settings") { SystemSettingsLink.open(SystemSettingsLink.focus) }
+                case .unavailable: Text("Not available").foregroundStyle(.secondary)
+                case .unknown: Button("Allow…") { Task { await focus.requestAccess() } }
+                }
+            }
+            shortcutPicker("Turn Focus on with", $settings.focusOnShortcut)
+            shortcutPicker("Turn Focus off with", $settings.focusOffShortcut)
+            if let error = focus.lastError { Text(error).foregroundStyle(.orange).font(.caption) }
+        } header: {
+            Text("Focus")
+        } footer: {
+            Text("macOS lets apps see only whether a Focus is on, not which one, and has no public way for apps to change it. Make two Shortcuts with the \u{201C}Set Focus\u{201D} action (e.g. Do Not Disturb on/off) and pick them here; the Home toggle runs them.")
+        }
+        .task { if launcher.availableShortcuts == nil { await launcher.loadShortcuts() } }
+    }
+
+    private func shortcutPicker(_ title: String, _ value: Binding<String>) -> some View {
+        Picker(title, selection: value) {
+            Text("None").tag("")
+            ForEach(launcher.availableShortcuts ?? [], id: \.self) { Text($0).tag($0) }
+        }
+    }
+}
+
+struct CommunicationSettings: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(NotificationMirror.self) private var mirror
+    @State private var confirm = false
+
+    var body: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Calls & Messages", isOn: Binding(
+                get: { settings.mirrorEnabled },
+                set: { on in if on { confirm = true } else { settings.mirrorEnabled = false } }))
+            if settings.mirrorEnabled {
+                HStack {
+                    Label(mirror.trusted ? "Accessibility allowed" : "Accessibility not allowed yet",
+                          systemImage: mirror.trusted ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .foregroundStyle(mirror.trusted ? .green : .orange)
+                    Spacer()
+                    if !mirror.trusted {
+                        Button("Allow…") { mirror.requestAccess() }
+                        Button("Check Again") { mirror.refreshTrust(); if mirror.trusted { mirror.start() } }
+                    }
+                }
+                Toggle("Hide message previews (sender only)", isOn: $settings.mirrorHidePreviews)
+                Toggle("Include notifications from other apps", isOn: $settings.mirrorOtherApps)
+            }
+        } header: {
+            Text("Calls & Messages")
+        } footer: {
+            Text("macOS has no public API for other apps' calls or messages. When on, Stitchy uses Accessibility to read only the notification banners macOS already shows you (Messages, FaceTime, Phone), and shows them in the island. Nothing is saved or uploaded; the last few stay in memory. Accept/Decline appear only when the banner has those buttons. Replying isn't supported.")
+        }
+        .alert("Allow Calls & Messages?", isPresented: $confirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Continue") {
+                settings.mirrorEnabled = true
+                mirror.requestAccess()
+            }
+        } message: {
+            Text("Stitchy will ask for Accessibility access. It uses it only to read the text of notification banners from Messages, FaceTime and Phone (or other apps if you allow). It doesn't read other windows, record keystrokes, or keep message history.")
+        }
+    }
+}
+
+struct SpotifySettings: View {
+    @Environment(AppSettings.self) private var settings
+    @Environment(QueueService.self) private var queue
+    @State private var connecting = false
+
+    var body: some View {
+        @Bindable var settings = settings
+        Section {
+            TextField("Spotify Client ID", text: $settings.spotifyClientID)
+                .textFieldStyle(.roundedBorder)
+                .disabled(queue.spotifyConnected)
+            LabeledContent("Redirect URI to register") {
+                Text(SpotifyAuth.redirectURI).textSelection(.enabled).font(.callout.monospaced())
+            }
+            HStack {
+                if queue.spotifyConnected {
+                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Spacer()
+                    Button("Disconnect") { queue.disconnectSpotify() }
+                } else {
+                    Button(connecting ? "Waiting for browser…" : "Connect Spotify…") {
+                        connecting = true
+                        Task { await queue.connectSpotify(); connecting = false }
+                    }
+                    .disabled(settings.spotifyClientID.isEmpty || connecting)
+                    Spacer()
+                    Link("Spotify Developer Dashboard", destination: URL(string: "https://developer.spotify.com/dashboard")!)
+                }
+            }
+            if let error = queue.signInError { Text(error).foregroundStyle(.orange).font(.caption) }
+        } header: {
+            Text("Spotify Up Next")
+        } footer: {
+            Text("The Spotify app doesn't share its queue with other apps; Spotify's Web API does. Create a free app in the Spotify Developer Dashboard, add the redirect URI above, select \u{201C}Web API\u{201D}, and paste its Client ID here. Stitchy signs in with PKCE (no secret), asks only to read playback state, and keeps the sign-in token in your Keychain.")
         }
     }
 }

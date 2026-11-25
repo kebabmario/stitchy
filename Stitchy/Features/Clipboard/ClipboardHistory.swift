@@ -26,6 +26,21 @@ final class ClipboardHistory {
         let date = Date()
         let content: Content
         let sourceApp: String?
+        var pinned = false
+
+        /// Recognised kinds of text that get a one-tap action.
+        enum Smart: Equatable { case link(URL), color(NSColor), email(String) }
+        var smart: Smart? {
+            guard case .text(let raw) = content else { return nil }
+            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.range(of: #"^#?([0-9a-fA-F]{6})$"#, options: .regularExpression) != nil,
+               let v = UInt32(t.replacingOccurrences(of: "#", with: ""), radix: 16) {
+                return .color(NSColor(srgbRed: CGFloat((v >> 16) & 0xff) / 255, green: CGFloat((v >> 8) & 0xff) / 255, blue: CGFloat(v & 0xff) / 255, alpha: 1))
+            }
+            if t.range(of: #"^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$"#, options: .regularExpression) != nil { return .email(t) }
+            if !t.contains(" "), let url = URL(string: t), let scheme = url.scheme, ["http", "https"].contains(scheme), url.host != nil { return .link(url) }
+            return nil
+        }
 
         var preview: String {
             switch content {
@@ -37,11 +52,24 @@ final class ClipboardHistory {
 
         var symbol: String {
             switch content {
-            case .text(let s): s.hasPrefix("http") ? "link" : "doc.plaintext"
+            case .text(let s): s.hasPrefix("http") ? "link" : Self.looksLikeCode(s) ? "chevron.left.forwardslash.chevron.right" : "doc.plaintext"
             case .files: "doc.on.doc"
             case .image: "photo"
             }
         }
+
+        /// Heuristic: several lines, or code punctuation/keywords. Used for the icon
+        /// and monospaced preview only, so a wrong guess is harmless.
+        nonisolated static func looksLikeCode(_ text: String) -> Bool {
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard t.count >= 8, !t.hasPrefix("http") else { return false }
+            let signals = [#"[{};]\s*$"#, #"^\s*(func|let|var|const|def|class|import|return|if|for|while|#include|public|private|SELECT|<\w+[ >])\b"#,
+                           #"=>|->|::|\(\)|!=|==|&&|\|\|"#, #"^\s{2,}\S"#]
+            let hits = signals.filter { t.range(of: "(?m)" + $0, options: .regularExpression) != nil }.count
+            return hits >= 2
+        }
+
+        var isCode: Bool { if case .text(let s) = content { Self.looksLikeCode(s) } else { false } }
 
         static func == (a: Entry, b: Entry) -> Bool { a.id == b.id }
     }
@@ -102,10 +130,34 @@ final class ClipboardHistory {
     /// Adds an entry, moving an identical earlier copy to the top. Exposed for tests.
     func record(_ entry: Entry) {
         islandLog.info("clipboard recorded \(entry.symbol, privacy: .public)")
+        var entry = entry
+        if let existing = entries.first(where: { $0.content == entry.content }) { entry.pinned = existing.pinned }
         entries.removeAll { $0.content == entry.content }
         entries.insert(entry, at: 0)
+        trim()
+    }
+
+    /// Pinned entries never count against the limit and survive Clear.
+    private func trim() {
         let limit = max(1, Int(settings.clipboardHistorySize))
-        if entries.count > limit { entries.removeLast(entries.count - limit) }
+        var unpinned = 0
+        entries = entries.filter { e in
+            if e.pinned { return true }
+            unpinned += 1
+            return unpinned <= limit
+        }
+    }
+
+    func togglePin(_ entry: Entry) {
+        guard let i = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[i].pinned.toggle()
+        trim()
+    }
+
+    func search(_ query: String) -> [Entry] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let sorted = entries.filter(\.pinned) + entries.filter { !$0.pinned }
+        return q.isEmpty ? sorted : sorted.filter { $0.preview.localizedCaseInsensitiveContains(q) || ($0.sourceApp ?? "").localizedCaseInsensitiveContains(q) }
     }
 
     /// Puts an entry back on the clipboard. Not re-recorded as a new copy.
@@ -123,5 +175,6 @@ final class ClipboardHistory {
     }
 
     func delete(_ entry: Entry) { entries.removeAll { $0.id == entry.id } }
-    func clear() { entries.removeAll() }
+    /// Removes everything except pinned entries.
+    func clear() { entries.removeAll { !$0.pinned } }
 }

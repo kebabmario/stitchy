@@ -19,11 +19,19 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>4</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Stitchy uses audio capture only to set each app's volume. Audio is passed straight to your speakers; nothing is recorded.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Stitchy uses the camera only for Camera Mirror, while its window is open. Nothing is recorded.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Stitchy uses the microphone only while you dictate.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Stitchy turns your dictation into text, on this Mac when your language supports it.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -33,14 +41,57 @@
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Stitchy uses Apple Events to show artwork and playback position, and to play, pause and skip tracks in Music and Spotify.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Stitchy Face ID uses the camera only while you enroll or run a check. Frames are processed on this Mac and never saved or uploaded.</string>
+	<string>Stitchy uses Apple Events to show artwork and controls for Music and Spotify, and to list, create and open your notes in Apple Notes.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Stitchy shows when Bluetooth devices like AirPods or keyboards connect or disconnect. It doesn't pair or control devices.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Stitchy uses your approximate location once to show local weather. You can pick a city instead.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Stitchy uses your approximate location once to show local weather. You can pick a city instead.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Stitchy shows a Focus indicator in the island when a Focus is on.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Stitchy shows today's events and reminds you before meetings. Calendar data stays on this Mac.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Stitchy shows today's events and reminds you before meetings. Calendar data stays on this Mac.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Stitchy watches your Downloads folder to show download progress in the island. It never moves or deletes files.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Add to Stitchy Shelf</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>addToShelf</string>
+			<key>NSPortName</key>
+			<string>Stitchy</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Translate with Stitchy</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>translateText</string>
+			<key>NSPortName</key>
+			<string>Stitchy</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

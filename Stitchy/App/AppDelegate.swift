@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var island: IslandWindowController!
     private var statusBar: StatusBarController!
     private var settingsWindow: SettingsWindowController?
+    private var shelfService: ShelfServiceProvider?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let services = AppServices()
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         services.start()
+        let provider = ShelfServiceProvider(shelf: services.shelf, island: services.island)
+        shelfService = provider
+        NSApp.servicesProvider = provider
+        NSUpdateDynamicServices()
         observeContinuously { [weak self] in
             guard let self else { return }
             if self.services.settings.islandVisible { self.island.show() } else { self.island.hide() }

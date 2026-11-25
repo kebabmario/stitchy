@@ -38,7 +38,10 @@ private struct FilesView: View {
                     HStack(spacing: 4) {
                         ForEach(shelf.items) { item in FileTile(item: item) }
                     }
+                    .padding(4)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .well(padding: 4)
                 footer
             }
         }
@@ -51,33 +54,35 @@ private struct FilesView: View {
                 .font(.system(size: 24, weight: .medium))
                 .symbolEffect(.bounce, value: targeted)
             Text(targeted ? "Release to Add" : "Drop Files Here")
-                .font(.system(size: 13, weight: .semibold))
+                .font(DS.title)
             Text(shelf.items.isEmpty ? "Files stay where they are. The shelf only keeps a reference." : "\(shelf.items.count) on Shelf")
-                .font(.system(size: 11))
+                .font(DS.caption)
                 .foregroundStyle(Color.secondaryText)
         }
         .foregroundStyle(targeted ? .white : .white.opacity(0.75))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.white.opacity(targeted ? 0.1 : 0.03))
+            RoundedRectangle(cornerRadius: DS.wellRadius, style: .continuous)
+                .fill(.white.opacity(targeted ? 0.1 : 0.04))
                 .strokeBorder(.white.opacity(targeted ? 0.5 : 0.16), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: targeted)
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            Text(shelf.items.count == 1 ? "1 item" : "\(shelf.items.count) items")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.secondaryText)
+        HStack(spacing: 6) {
+            SectionLabel(shelf.items.count == 1 ? "1 item" : "\(shelf.items.count) items")
             if shelf.airDropInProgress != nil {
-                Label("Sending…", systemImage: "airplayaudio").font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
+                Label("Sending…", systemImage: "airplayaudio").font(DS.caption).foregroundStyle(.blue)
             }
-            Spacer()
-            PillButton(title: "AirDrop", symbol: "airplayaudio") { shelf.airDrop() }
-            PillButton(title: "Reveal", symbol: "folder") { shelf.reveal() }
-            PillButton(title: "Clear", symbol: "xmark") { withAnimation(.snappy) { shelf.clear() } }
+            Spacer(minLength: 4)
+            Chip(title: "Zip", symbol: "doc.zipper") { Task { await shelf.compress() } }
+                .help("Creates a .zip next to the first file. Originals are untouched.")
+            Chip(title: "PDF", symbol: "doc.richtext") { shelf.combineIntoPDF() }
+                .help("Combines the shelf's PDFs and images, in order, into a new PDF.")
+            Chip(title: "Share", symbol: "airplayaudio") { shelf.airDrop() }.help("Send with AirDrop")
+            Chip(title: "Show", symbol: "folder") { shelf.reveal() }.help("Show in Finder")
+            Chip(title: "Clear", symbol: "xmark") { withAnimation(.snappy) { shelf.clear() } }
                 .help("Removes items from the shelf. Files on disk are not touched.")
         }
     }
@@ -86,6 +91,8 @@ private struct FilesView: View {
 private struct FileTile: View {
     let item: FileShelf.Item
     @Environment(FileShelf.self) private var shelf
+    @Environment(CaptureService.self) private var capture
+    @Environment(AppServices.self) private var services
     @Environment(AppSettings.self) private var settings
     @State private var hovering = false
 
@@ -123,7 +130,7 @@ private struct FileTile: View {
                         .foregroundStyle(.white, Color(white: 0.3))
                         .font(.system(size: 15))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plainHit)
                 .help("Remove from Shelf (file is kept)")
                 .transition(.scale.combined(with: .opacity))
             }
@@ -132,10 +139,38 @@ private struct FileTile: View {
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
         .onTapGesture(count: 2) { if exists { shelf.open(item) } }
         .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
+        .modifier(ReorderDrop(item: item))
         .contextMenu {
             Button("Open") { shelf.open(item) }.disabled(!exists)
             Button("Show in Finder") { shelf.reveal([item]) }.disabled(!exists)
             Button("AirDrop") { shelf.airDrop([item]) }.disabled(!exists)
+            Divider()
+            Button("Compress to Zip") { Task { await shelf.compress([item]) } }.disabled(!exists)
+            if shelf.isImage(item) {
+                Button("Save a PNG Copy") { shelf.convertImage(item, toPNG: true) }
+                Button("Save a JPEG Copy") { shelf.convertImage(item, toPNG: false) }
+                Menu("Save a Resized Copy") {
+                    ForEach([3840, 2560, 1920, 1280, 1024, 512], id: \.self) { px in
+                        Button("\(px) px (longest side)") { shelf.resizeImage(item, maxPixels: px) }
+                    }
+                }
+            }
+            if shelf.isImage(item) {
+                Button("Save a Compressed Copy") { shelf.compressImage(item) }.disabled(!exists)
+            }
+            if shelf.isVideo(item) {
+                Button("Save a Compressed Copy (HEVC 1080p)") { Task { await shelf.compressVideo(item) } }.disabled(!exists)
+            }
+            if shelf.isImage(item) || item.url.pathExtension.lowercased() == "pdf" {
+                Button("Copy Text (OCR)") { Task { await capture.copyText(from: item.url) } }.disabled(!exists)
+            }
+            if shelf.isImage(item) {
+                Button("Annotate…") { services.annotator.open(item.url) }.disabled(!exists)
+                Button("Remove Background") {
+                    Task { if let out = await capture.removeBackground(item.url) { shelf.add([out]) } }
+                }.disabled(!exists)
+            }
+            Button("Copy Path") { shelf.copyPaths([item]) }
             Divider()
             Button("Remove from Shelf") { shelf.remove(item) }
         }
@@ -148,6 +183,7 @@ private struct FileTile: View {
 private struct ClipboardView: View {
     @Environment(ClipboardHistory.self) private var clipboard
     @Environment(AppSettings.self) private var settings
+    @State private var query = ""
 
     var body: some View {
         if !settings.clipboardEnabled {
@@ -165,9 +201,10 @@ private struct ClipboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
+                SearchField(text: $query, prompt: "Search clipboard")
                 IslandScroll(axis: .vertical) {
                     VStack(spacing: 2) {
-                        ForEach(clipboard.entries) { ClipRow(entry: $0) }
+                        ForEach(clipboard.search(query)) { ClipRow(entry: $0) }
                     }
                 }
                 HStack {
@@ -175,7 +212,7 @@ private struct ClipboardView: View {
                         .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Color.tertiaryText)
                     Spacer()
                     Button("Clear History") { withAnimation(.snappy) { clipboard.clear() } }
-                        .buttonStyle(.plain).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Color.secondaryText)
+                        .buttonStyle(.plainHit).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Color.secondaryText)
                 }
             }
         }
@@ -200,18 +237,26 @@ private struct ClipRow: View {
                 }
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.preview).font(.system(size: 11.5, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                Text(entry.preview).font(entry.isCode ? .system(size: 11, weight: .medium, design: .monospaced) : .system(size: 11.5, weight: .medium)).lineLimit(1).truncationMode(.tail)
                 Text([entry.sourceApp, entry.date.formatted(.relative(presentation: .numeric, unitsStyle: .narrow))].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 9.5)).foregroundStyle(Color.tertiaryText)
             }
             Spacer(minLength: 4)
+            smartAction
             if copied {
                 Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.green)
-            } else if hovering {
-                Button { withAnimation(.snappy) { clipboard.delete(entry) } } label: {
-                    Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.secondaryText)
+            } else if hovering || entry.pinned {
+                Button { withAnimation(.snappy) { clipboard.togglePin(entry) } } label: {
+                    Image(systemName: entry.pinned ? "pin.fill" : "pin").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(entry.pinned ? Color.orange : Color.secondaryText)
                 }
-                .buttonStyle(.plain).help("Delete entry")
+                .buttonStyle(PressableStyle()).help(entry.pinned ? "Unpin" : "Pin (kept when clearing)")
+                if hovering {
+                    Button { withAnimation(.snappy) { clipboard.delete(entry) } } label: {
+                        Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.secondaryText)
+                    }
+                    .buttonStyle(PressableStyle()).help("Delete entry")
+                }
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
@@ -224,5 +269,44 @@ private struct ClipRow: View {
             Task { try? await Task.sleep(for: .seconds(1)); withAnimation { copied = false } }
         }
         .help("Click to copy")
+    }
+
+    @ViewBuilder private var smartAction: some View {
+        switch entry.smart {
+        case .link(let url):
+            Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "safari").font(.system(size: 10, weight: .semibold)) }
+                .buttonStyle(PressableStyle()).foregroundStyle(.blue).help("Open link")
+        case .email(let address):
+            Button { if let u = URL(string: "mailto:\(address)") { NSWorkspace.shared.open(u) } } label: {
+                Image(systemName: "envelope").font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(PressableStyle()).foregroundStyle(.blue).help("New email")
+        case .color(let color):
+            Circle().fill(Color(nsColor: color)).frame(width: 12, height: 12).overlay(Circle().strokeBorder(.white.opacity(0.3)))
+                .help("Colour")
+        case nil:
+            EmptyView()
+        }
+    }
+}
+
+/// Dropping onto a tile reorders shelf files or inserts new ones there.
+private struct ReorderDrop: ViewModifier {
+    let item: FileShelf.Item
+    @Environment(FileShelf.self) private var shelf
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        if SnapshotRenderer.isRendering {
+            content
+        } else {
+            content
+                .overlay(alignment: .leading) {
+                    if targeted { Capsule().fill(.white).frame(width: 3).padding(.vertical, 8).offset(x: -4).transition(.opacity) }
+                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    withAnimation(.snappy) { shelf.place(urls, before: item) }
+                } isTargeted: { t in withAnimation(.easeOut(duration: 0.12)) { targeted = t } }
+        }
     }
 }

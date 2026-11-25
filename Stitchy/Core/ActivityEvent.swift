@@ -20,3 +20,18 @@ struct ActivityEvent: Identifiable {
     var showsAlert = true
     var alertDuration: TimeInterval = 2.8
 }
+
+/// Drops an event identical (title + detail) to one posted in the last few
+/// seconds, so a feature that fires twice doesn't show two alerts.
+struct DuplicateFilter {
+    var window: TimeInterval = 4
+    private var recent: [String: Date] = [:]
+
+    mutating func allows(_ event: ActivityEvent, now: Date = Date()) -> Bool {
+        let key = event.title + "\u{1F}" + (event.detail ?? "")
+        recent = recent.filter { now.timeIntervalSince($0.value) < window }
+        if recent[key] != nil { return false }
+        recent[key] = now
+        return true
+    }
+}

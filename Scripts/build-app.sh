@@ -34,7 +34,17 @@ fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 IDENTITY="${STITCHY_SIGN_IDENTITY:--}"
-codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
+if [[ "$IDENTITY" == "-" ]]; then
+  # Ad-hoc signatures default to a designated requirement of the exact
+  # cdhash, so macOS treats every rebuild as a new app and forgets
+  # Calendar, Automation, Camera and Downloads permissions. Pin the
+  # requirement to the bundle identifier instead so grants survive rebuilds.
+  # (A real Apple Development certificate is stronger; see README.)
+  codesign --force --sign - --timestamp=none \
+    --requirements '=designated => identifier "app.stitchy.Stitchy"' "$APP"
+else
+  codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
+fi
 codesign --verify --strict "$APP"
 echo "Built $APP (signed with: $IDENTITY)"
 

@@ -12,7 +12,8 @@ struct CompactIslandView: View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
                 if let primary { ActivityGlyph(activity: primary, size: 18) }
-                if activities.count > 1 {
+                // Music's wing is narrow (cover only), so no "next activity" hint there.
+                if activities.count > 1, !(primary.map { if case .music = $0.kind { true } else { false } } ?? false) {
                     Image(systemName: activities[1].symbol)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(activities[1].tint.opacity(0.8))
@@ -57,6 +58,8 @@ struct ActivityGlyph: View {
                 Image(systemName: "arrow.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.blue)
             }
             .frame(width: size - 2, height: size - 2)
+        case .weather:
+            Image(systemName: activity.symbol).symbolRenderingMode(.multicolor).font(.system(size: size * 0.7))
         case .camera, .microphone:
             Circle().fill(activity.tint).frame(width: 8, height: 8)
                 .overlay(Circle().fill(activity.tint.opacity(0.35)).frame(width: 14, height: 14))
@@ -72,6 +75,8 @@ struct ActivityGlyph: View {
 struct ActivityValue: View {
     let activity: IslandActivity
     var compact = false
+    @Environment(WeatherService.self) private var weather
+    @Environment(NotificationMirror.self) private var mirror
     @Environment(NowPlayingService.self) private var nowPlaying
     @Environment(AppSettings.self) private var settings
     @Environment(PrivacyGuard.self) private var privacy
@@ -100,6 +105,24 @@ struct ActivityValue: View {
                 if let f = d.fraction { Text(f, format: .percent.precision(.fractionLength(0))) } else { Image(systemName: "ellipsis") }
             case .airDrop:
                 Image(systemName: "ellipsis")
+            case .keepAwake:
+                Image(systemName: "infinity")
+            case .agent(let status):
+                if compact {
+                    Image(systemName: "ellipsis").symbolEffect(.variableColor.iterative, options: .repeating, isActive: !settings.reduceMotion)
+                } else {
+                    Text(status).font(.system(size: 11, weight: .medium)).truncationMode(.middle)
+                }
+            case .micMuted:
+                Text("Muted")
+            case .focus:
+                Text("Focus")
+            case .call:
+                TimelineView(.periodic(from: .timelineAnchor, by: 1)) { context in
+                    Text(mirror.callStarted.map { context.date.timeIntervalSince($0).clockStringFloor } ?? "Call")
+                }
+            case .weather:
+                Text(weather.current.map { "\(Int($0.temperature.rounded()))°" } ?? "")
             case .camera:
                 TimelineView(.periodic(from: .timelineAnchor, by: 1)) { context in
                     Text(compact ? "Camera" : (privacy.cameraSince.map { context.date.timeIntervalSince($0).clockStringFloor } ?? ""))
@@ -162,11 +185,17 @@ struct HUDIslandView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Image(systemName: event.symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(event.tint)
-                .contentTransition(.symbolEffect(.replace))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if let auth = event.auth {
+                    TouchIDGlyph(phase: auth, size: 14)
+                } else {
+                    Image(systemName: event.symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(event.tint)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Color.clear.frame(width: notchWidth - 20)
             Group {
                 if let level = event.level {
