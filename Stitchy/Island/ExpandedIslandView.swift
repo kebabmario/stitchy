@@ -14,7 +14,8 @@ struct ExpandedIslandView: View {
                 .id(currentTab)
                 .transition(.blurReplace)
                 .frame(maxWidth: .infinity)
-                .frame(height: currentTab.contentHeight, alignment: .top)
+                // Lyrics / Up Next grow the island; the page must grow with it or the bottom stays empty.
+                .frame(height: currentTab.contentHeight + (currentTab == .music ? geometry.extraHeight : 0), alignment: .top)
         }
         .padding(.top, geometry.expandedTopPadding)
         .padding(.horizontal, 18)
@@ -258,7 +259,7 @@ struct LockScreenPage: View {
 
     var body: some View {
         if music.track != nil {
-            MusicView()
+            LockScreenNowPlaying()
         } else {
             clock
         }
@@ -328,5 +329,150 @@ struct TouchIDGlyph: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.65), value: phase)
         .onAppear { animate = true }
         .accessibilityLabel(phase == .scanning ? "Waiting for Touch ID" : phase == .success ? "Unlocked" : "Locked")
+    }
+}
+
+/// Lock screen Now Playing: the cover's colours fill the background, a big
+/// clock sits behind the cover's subject (depth, via Vision), synced lyrics
+/// and Up Next beside it. Read-only data; controls only play/skip.
+struct LockScreenNowPlaying: View {
+    @Environment(NowPlayingService.self) private var music
+    @Environment(LyricsService.self) private var lyrics
+    @Environment(QueueService.self) private var queue
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        ZStack {
+            backdrop
+            HStack(alignment: .top, spacing: DS.Space.m) {
+                DepthArtwork(image: music.artwork, size: 136)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(music.track?.title ?? "").font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    Text(music.track.map { $0.artist.isEmpty ? $0.album : $0.artist } ?? "")
+                        .font(DS.body).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    lyricLines.padding(.top, DS.Space.s)
+                    Spacer(minLength: 4)
+                    upNext
+                    transport.padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(DS.Space.s)
+        }
+        .foregroundStyle(.white)
+        .task(id: music.track?.id) {
+            if settings.lyricsEnabled, let t = music.track {
+                await lyrics.load(title: t.title, artist: t.artist, album: t.album, duration: t.duration, embedded: music.embeddedLyrics)
+            }
+            await queue.refresh(player: music.player, shuffle: music.shuffle)
+        }
+    }
+
+    /// The cover, blurred and darkened, fills the page.
+    private var backdrop: some View {
+        GeometryReader { geo in
+            Group {
+                if let art = music.artwork {
+                    Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 36).saturation(1.3)
+                        .overlay(LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                } else {
+                    music.accent.opacity(0.25)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DS.wellRadius, style: .continuous))
+        }
+    }
+
+    /// Current line large, next line dimmed; updates with playback.
+    private var lyricLines: some View {
+        TimelineView(.periodic(from: .timelineAnchor, by: music.isPlaying ? 0.25 : 3600)) { context in
+            let (current, next) = Self.lines(lyrics.state, at: music.elapsed(at: context.date))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(current ?? "♪").font(.system(size: 13, weight: .bold)).lineLimit(2)
+                    .id(current).transition(.push(from: .bottom).combined(with: .opacity))
+                if let next { Text(next).font(DS.caption).foregroundStyle(.white.opacity(0.5)).lineLimit(1) }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.9), value: current)
+        }
+    }
+
+    nonisolated static func lines(_ state: LyricsService.State, at time: TimeInterval?) -> (String?, String?) {
+        guard case .synced(let lines) = state, let time, let i = LyricsService.index(in: lines, at: time + 0.2) else { return (nil, nil) }
+        let next = lines[(i + 1)...].first { !$0.text.isEmpty }?.text
+        return (lines[i].text.isEmpty ? nil : lines[i].text, next)
+    }
+
+    @ViewBuilder private var upNext: some View {
+        if let item = queue.items.first {
+            HStack(spacing: 4) {
+                Text("UP NEXT").font(DS.label).tracking(0.8).foregroundStyle(.white.opacity(0.5))
+                Text("\(item.title) · \(item.artist)").font(DS.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+            }
+        }
+    }
+
+    private var transport: some View {
+        HStack(spacing: DS.Space.m) {
+            button("backward.fill", 12) { music.previous() }
+            button(music.isPlaying ? "pause.fill" : "play.fill", 15) { music.playPause() }
+            button("forward.fill", 12) { music.next() }
+        }
+        .disabled(!music.controlsEnabled)
+    }
+
+    private func button(_ symbol: String, _ size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: size, weight: .bold)).frame(width: 26, height: 22)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(PressableStyle())
+    }
+}
+
+/// Cover art with a big clock behind its subject. Vision finds the subject
+/// once per cover (on this Mac); without one, the clock just sits on top.
+struct DepthArtwork: View {
+    let image: NSImage?
+    let size: CGFloat
+    @State private var cutout: NSImage?
+
+    /// "4:04" or "16:04" by the user's locale, without AM/PM or a leading zero.
+    static func clock(_ date: Date, locale: Locale = .current) -> String {
+        let f = DateFormatter()
+        f.locale = locale
+        f.setLocalizedDateFormatFromTemplate("jmm")
+        f.amSymbol = ""
+        f.pmSymbol = ""
+        return f.string(from: date).trimmingCharacters(in: .whitespaces)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ArtworkView(image: image, size: size, radius: size * 0.12)
+            TimelineView(.everyMinute) { context in
+                Text(Self.clock(context.date))
+                    .font(DS.numerals(size * 0.3, weight: .bold))
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 6)
+                    .padding(.top, size * 0.06)
+            }
+            if let cutout {
+                Image(nsImage: cutout).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.12, style: .continuous))
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(width: size, height: size)
+        .task(id: image.map { ObjectIdentifier($0) }) {
+            cutout = nil
+            guard let cg = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let result = await Task.detached(priority: .utility) { (try? CaptureService.subjectCutout(cg)).map(UncheckedBox.init) }.value
+            withAnimation(.easeOut(duration: 0.4)) { cutout = result.map { NSImage(cgImage: $0.value, size: .zero) } }
+        }
     }
 }

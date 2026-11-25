@@ -7,7 +7,11 @@ import Observation
 /// use and a file name: never commands, prompts or replies.
 @MainActor @Observable
 final class AgentActivityMonitor {
-    enum Agent: String { case claude = "Claude Code", codex = "Codex" }
+    enum Agent: String {
+        case claude = "Claude Code", codex = "Codex"
+        /// Installed app whose icon represents this agent (see AppIcons).
+        var appName: String { self == .claude ? "Claude" : "Codex" }
+    }
 
     struct Session: Identifiable, Equatable {
         let id: String          // log file path
@@ -15,6 +19,7 @@ final class AgentActivityMonitor {
         var project: String
         var status: String
         var updated: Date
+        var started = Date()
     }
 
     enum Event: Equatable { case tool(String), thinking, finished }

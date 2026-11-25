@@ -422,13 +422,14 @@ struct Chip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .bold)) }
-                Text(title).font(.system(size: 11, weight: .semibold))
+                if !title.isEmpty { Text(title).font(.system(size: 11, weight: .semibold)) }
             }
-            .padding(.horizontal, 10).frame(height: 24)
+            .padding(.horizontal, title.isEmpty ? 7 : 10).frame(minWidth: 24).frame(height: 24)
             .foregroundStyle(active ? .black : tint)
             .background(Capsule().fill(active ? tint : .white.opacity(0.09)))
             .contentShape(Capsule())
         }
         .buttonStyle(PressableStyle())
+        .accessibilityLabel(title.isEmpty ? (symbol ?? "") : title)
     }
 }

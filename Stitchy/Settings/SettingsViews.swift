@@ -195,10 +195,12 @@ struct FeaturesSettingsView: View {
             }
             Section {
                 Toggle("Show live activities in the compact island", isOn: $settings.compactActivities)
+                Toggle("Show extra activities as bubbles beside the island", isOn: $settings.activityBubbles).disabled(!settings.compactActivities)
                 Toggle("Timers, stopwatch and Focus", isOn: $settings.showTimerActivity).disabled(!settings.compactActivities)
                 Toggle("Music", isOn: $settings.showMusicActivity).disabled(!settings.compactActivities)
                 Toggle("Downloads and AirDrop", isOn: $settings.showTransferActivity).disabled(!settings.compactActivities)
                 Toggle("Camera and microphone", isOn: $settings.showPrivacyActivity).disabled(!settings.compactActivities)
+                Toggle("Coding agents (Claude Code, Codex)", isOn: $settings.agentActivityEnabled)
             } header: {
                 Text("Activity Visibility")
             } footer: {
@@ -288,6 +290,22 @@ struct ClipboardSettingsView: View {
             Section("File Shelf") {
                 Toggle("Show file previews", isOn: $settings.shelfPreviews)
                 Toggle("Put new screenshots on the Shelf", isOn: $settings.screenshotsToShelf)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tracked folder")
+                        Text(settings.trackedFolder.isEmpty ? "New files in a folder you pick land on the Shelf." : settings.trackedFolder)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                    if !settings.trackedFolder.isEmpty { Button("Stop") { settings.trackedFolder = "" } }
+                    Button("Choose…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url { settings.trackedFolder = url.path }
+                    }
+                }
                 Text("The shelf only keeps references. Removing items or clearing the shelf never touches files on disk.")
                     .font(.caption).foregroundStyle(.secondary)
             }

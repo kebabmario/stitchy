@@ -80,10 +80,13 @@ private struct FilesView: View {
                 .help("Creates a .zip next to the first file. Originals are untouched.")
             Chip(title: "PDF", symbol: "doc.richtext") { shelf.combineIntoPDF() }
                 .help("Combines the shelf's PDFs and images, in order, into a new PDF.")
-            Chip(title: "Share", symbol: "airplayaudio") { shelf.airDrop() }.help("Send with AirDrop")
-            Chip(title: "Show", symbol: "folder") { shelf.reveal() }.help("Show in Finder")
-            Chip(title: "Clear", symbol: "xmark") { withAnimation(.snappy) { shelf.clear() } }
-                .help("Removes items from the shelf. Files on disk are not touched.")
+            Chip(title: "Folder", symbol: "folder.badge.plus") { shelf.gatherIntoFolder() }
+                .help("Copies the shelf's files into a new folder. Originals stay where they are.")
+            Chip(title: "", symbol: "airplayaudio") { shelf.airDrop() }.help("Send with AirDrop").accessibilityLabel("Send with AirDrop")
+            Chip(title: "", symbol: "magnifyingglass") { shelf.reveal() }.help("Show in Finder").accessibilityLabel("Show in Finder")
+            Chip(title: "", symbol: "xmark") { withAnimation(.snappy) { shelf.clear() } }
+                .accessibilityLabel("Clear shelf")
+                .help("Removes unpinned items from the shelf. Files on disk are not touched.")
         }
     }
 }
@@ -122,6 +125,13 @@ private struct FileTile: View {
         .frame(width: 74)
         .padding(5)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(hovering ? 0.1 : 0)))
+        .overlay(alignment: .topLeading) {
+            if shelf.isPinned(item) {
+                Image(systemName: "pin.fill").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange)
+                    .padding(4).background(Circle().fill(.black.opacity(0.6))).padding(2)
+                    .accessibilityLabel("Pinned")
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if hovering {
                 Button { withAnimation(.snappy) { shelf.remove(item) } } label: {
@@ -170,8 +180,15 @@ private struct FileTile: View {
                     Task { if let out = await capture.removeBackground(item.url) { shelf.add([out]) } }
                 }.disabled(!exists)
             }
+            if shelf.isZip(item) {
+                Button("Unzip Here") { Task { await shelf.unzip(item) } }.disabled(!exists)
+            }
+            if shelf.isPDF(item) {
+                Button("Save a Smaller PDF") { shelf.shrinkPDF(item) }.disabled(!exists)
+            }
             Button("Copy Path") { shelf.copyPaths([item]) }
             Divider()
+            Button(shelf.isPinned(item) ? "Unpin" : "Pin to Shelf") { shelf.togglePin(item) }
             Button("Remove from Shelf") { shelf.remove(item) }
         }
         .help(item.url.path)
@@ -305,7 +322,14 @@ private struct ReorderDrop: ViewModifier {
                     if targeted { Capsule().fill(.white).frame(width: 3).padding(.vertical, 8).offset(x: -4).transition(.opacity) }
                 }
                 .dropDestination(for: URL.self) { urls, _ in
-                    withAnimation(.snappy) { shelf.place(urls, before: item) }
+                    // New files onto a folder tile are copied into it; shelf files dropped anywhere reorder.
+                    let onShelf = Set(shelf.items.map(\.url))
+                    let incoming = urls.map(\.standardizedFileURL).filter { !onShelf.contains($0) }
+                    if shelf.isFolder(item), !incoming.isEmpty, incoming.count == urls.count {
+                        shelf.copy(incoming, intoFolder: item)
+                        return true
+                    }
+                    return withAnimation(.snappy) { shelf.place(urls, before: item) }
                 } isTargeted: { t in withAnimation(.easeOut(duration: 0.12)) { targeted = t } }
         }
     }

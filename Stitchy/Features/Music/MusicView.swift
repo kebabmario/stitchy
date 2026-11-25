@@ -293,10 +293,54 @@ private struct LyricsExpandedView: View {
                 }
             }
             content
-                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
-                                             .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.14),
+                                             .init(color: .black, location: 0.86), .init(color: .clear, location: 1)],
                                      startPoint: .top, endPoint: .bottom))
+            progress
         }
+        .padding(DS.Space.s)
+        .background(backdrop)
+    }
+
+    /// The cover's colours behind the lyrics so the page never reads as empty black.
+    private var backdrop: some View {
+        GeometryReader { geo in
+            Group {
+                if let art = music.artwork {
+                    Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 40).saturation(1.25)
+                        .overlay(LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0.35), .black.opacity(0.6)],
+                                                startPoint: .top, endPoint: .bottom))
+                } else {
+                    LinearGradient(colors: [music.accent.opacity(0.22), .black], startPoint: .top, endPoint: .bottom)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DS.wellRadius, style: .continuous))
+        }
+    }
+
+    /// Slim position bar so the bottom of the page has a purpose.
+    private var progress: some View {
+        TimelineView(.periodic(from: .timelineAnchor, by: music.isPlaying ? 1 : 3600)) { context in
+            let elapsed = music.elapsed(at: context.date) ?? 0
+            let duration = track.duration ?? 0
+            HStack(spacing: DS.Space.s) {
+                Text(elapsed.clockStringFloor)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.2))
+                        Capsule().fill(.white.opacity(0.85))
+                            .frame(width: geo.size.width * (duration > 0 ? min(max(elapsed / duration, 0), 1) : 0))
+                    }
+                }
+                .frame(height: 3)
+                Text(duration > 0 ? "-" + max(duration - elapsed, 0).clockString : "")
+            }
+            .font(DS.numerals(9.5, weight: .medium))
+            .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(height: 12)
     }
 
     @ViewBuilder private var content: some View {
@@ -304,29 +348,32 @@ private struct LyricsExpandedView: View {
         case .synced(let lines):
             TimelineView(.periodic(from: .timelineAnchor, by: music.isPlaying ? 0.2 : 3600)) { context in
                 let current = music.elapsed(at: context.date).flatMap { LyricsService.index(in: lines, at: $0 + 0.2) }
+                GeometryReader { geo in
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 10) {
-                            Color.clear.frame(height: 40)
+                            // Half a page above and below, so the current line can sit in the middle.
+                            Color.clear.frame(height: geo.size.height * 0.42)
                             ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                                 Text(line.text.isEmpty ? "♪" : line.text)
                                     .font(.system(size: i == current ? 19 : 16, weight: i == current ? .bold : .semibold))
-                                    .foregroundStyle(.white.opacity(i == current ? 1 : (i < (current ?? 0) ? 0.25 : 0.4)))
+                                    .foregroundStyle(.white.opacity(i == current ? 1 : (i < (current ?? 0) ? 0.3 : 0.55)))
                                     .blur(radius: i == current ? 0 : 0.3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(i)
                                     .contentShape(Rectangle())
                                     .onTapGesture { if music.controlsEnabled { music.seek(to: line.time) } }
                             }
-                            Color.clear.frame(height: 60)
+                            Color.clear.frame(height: geo.size.height * 0.5)
                         }
                         .animation(.spring(response: 0.45, dampingFraction: 0.88), value: current)
                     }
                     .onChange(of: current) { _, i in
                         guard let i else { return }
-                        withAnimation(.spring(response: 0.6, dampingFraction: 0.9)) { proxy.scrollTo(i, anchor: UnitPoint(x: 0, y: 0.35)) }
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.9)) { proxy.scrollTo(i, anchor: .center) }
                     }
-                    .onAppear { if let current { proxy.scrollTo(current, anchor: UnitPoint(x: 0, y: 0.35)) } }
+                    .onAppear { proxy.scrollTo(current ?? 0, anchor: .center) }
+                }
                 }
             }
         case .plain(let text):

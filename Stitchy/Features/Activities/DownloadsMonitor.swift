@@ -157,10 +157,20 @@ final class DownloadsMonitor {
         downloads[index].fraction = finalURL == nil ? downloads[index].fraction : 1
         if let finalURL {
             onEvent?(ActivityEvent(
-                symbol: "arrow.down.circle.fill", tint: .blue, title: "Download Complete",
-                detail: finalURL.lastPathComponent, tab: .activity
+                symbol: "checkmark.circle.fill", tint: .green, title: "Download Complete",
+                detail: Self.completionDetail(finalURL), tab: .activity
             ))
         }
+    }
+
+    /// "Report.pdf · 2.4 MB · Downloads": the file, its size and where it went.
+    nonisolated static func completionDetail(_ url: URL) -> String {
+        var parts = [url.lastPathComponent]
+        if let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
+        }
+        parts.append(url.deletingLastPathComponent().lastPathComponent)
+        return parts.joined(separator: " · ")
     }
 
     private func trimFinished() {

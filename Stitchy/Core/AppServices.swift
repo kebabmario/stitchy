@@ -15,6 +15,7 @@ final class AppServices {
     @ObservationIgnored let timers: TimerStore
     @ObservationIgnored let shelf = FileShelf()
     @ObservationIgnored let screenshots = ScreenshotWatcher()
+    @ObservationIgnored let folderTracker = FolderTracker()
     @ObservationIgnored let mixer = AppVolumeMixer()
     @ObservationIgnored let dockPreviews = DockPreviews()
     @ObservationIgnored let windowSnapper = WindowSnapper()
@@ -67,6 +68,7 @@ final class AppServices {
 
     func start() {
         notifier.configure()
+        if !SnapshotRenderer.isRendering { shelf.restorePinned() }
         network.start()
         observeContinuously { [weak self] in self?.applyFeatureToggles() }
         // Lyrics follow the current track however it was learned (launch-time
@@ -90,6 +92,11 @@ final class AppServices {
         settings.bluetoothEnabled ? bluetooth.start() : bluetooth.stop()
         settings.drivesEnabled ? drives.start() : drives.stop()
         settings.shelfEnabled && settings.screenshotsToShelf ? screenshots.start() : screenshots.stop()
+        if settings.shelfEnabled, !settings.trackedFolder.isEmpty {
+            folderTracker.start(URL(fileURLWithPath: settings.trackedFolder, isDirectory: true))
+        } else {
+            folderTracker.stop()
+        }
         settings.dockPreviewsEnabled ? dockPreviews.start() : dockPreviews.stop()
         settings.windowSnapEnabled ? windowSnapper.start() : windowSnapper.stop()
         settings.xcodeBuildAlerts ? xcodeBuilds.start() : xcodeBuilds.stop()
@@ -170,12 +177,21 @@ final class AppServices {
                 tab: .activity))
         }
         agents.onFinished = { [weak self] session in
+            let took = Date().timeIntervalSince(session.started).clockStringFloor
             self?.post(ActivityEvent(symbol: "checkmark.seal.fill", tint: .orange, title: "\(session.agent.rawValue) finished",
-                                     detail: session.project.isEmpty ? nil : session.project, tab: .activity))
+                                     detail: session.project.isEmpty ? "took \(took)" : "\(session.project) · took \(took)",
+                                     artwork: AppIcons.icon(session.agent.appName), tab: .activity))
         }
         windowSnapper.onNeedsPermission = { [weak self] in
             self?.post(ActivityEvent(symbol: "rectangle.split.2x1", tint: .orange, title: "Allow Accessibility for snapping",
                                      detail: "System Settings › Privacy & Security › Accessibility", tab: .home, recordsInFeed: false))
+        }
+        folderTracker.onNewFiles = { [weak self] urls in
+            guard let self, self.shelf.add(urls) > 0 else { return }
+            self.post(ActivityEvent(symbol: "folder.fill", tint: .blue,
+                                    title: urls.count == 1 ? "New in \(self.folderTracker.folder?.lastPathComponent ?? "folder")" : "\(urls.count) new files",
+                                    detail: urls.count == 1 ? urls[0].lastPathComponent : self.folderTracker.folder?.lastPathComponent, tab: .shelf,
+                                    recordsInFeed: false))
         }
         screenshots.onScreenshot = { [weak self] url in
             guard let self, self.shelf.add([url]) > 0 else { return }

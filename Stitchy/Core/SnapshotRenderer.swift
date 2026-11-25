@@ -92,6 +92,12 @@ enum SnapshotRenderer {
         model.expand(.click, tab: .home)
         render("08-island-expanded")
         services.settings.style = .notch
+        model.collapse()
+        model.isScreenLocked = true
+        model.expand(.click, tab: .music)
+        render("11-lock-screen")
+        model.collapse()
+        model.isScreenLocked = false
         print("Snapshots written to \(dir.path)")
         return true
     }

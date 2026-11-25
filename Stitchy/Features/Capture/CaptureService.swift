@@ -117,16 +117,21 @@ final class CaptureService {
         guard !FileManager.default.fileExists(atPath: out.path),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return false }
-        let request = VNGenerateForegroundInstanceMaskRequest()
-        let handler = VNImageRequestHandler(cgImage: image)
-        try handler.perform([request])
-        guard let result = request.results?.first, !result.allInstances.isEmpty else { return false }
-        let buffer = try result.generateMaskedImage(ofInstances: result.allInstances, from: handler, croppedToInstancesExtent: false)
-        let ci = CIImage(cvPixelBuffer: buffer)
-        guard let cg = CIContext().createCGImage(ci, from: ci.extent),
+        guard let cg = try subjectCutout(image),
               let dest = CGImageDestinationCreateWithURL(out as CFURL, "public.png" as CFString, 1, nil) else { return false }
         CGImageDestinationAddImage(dest, cg, nil)
         return CGImageDestinationFinalize(dest)
+    }
+
+    /// The image's foreground subject(s) on transparency, same size as the input; nil if none.
+    nonisolated static func subjectCutout(_ image: CGImage) throws -> CGImage? {
+        let request = VNGenerateForegroundInstanceMaskRequest()
+        let handler = VNImageRequestHandler(cgImage: image)
+        try handler.perform([request])
+        guard let result = request.results?.first, !result.allInstances.isEmpty else { return nil }
+        let buffer = try result.generateMaskedImage(ofInstances: result.allInstances, from: handler, croppedToInstancesExtent: false)
+        let ci = CIImage(cvPixelBuffer: buffer)
+        return CIContext().createCGImage(ci, from: ci.extent)
     }
 
     nonisolated private static func run(_ tool: String, _ args: [String]) async -> Bool {

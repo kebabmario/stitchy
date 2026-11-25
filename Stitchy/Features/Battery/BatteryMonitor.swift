@@ -31,7 +31,8 @@ struct BatterySnapshot: Equatable, Sendable {
     var symbol: String {
         if isCharging || (isPluggedIn && hasBattery) { return "battery.100percent.bolt" }
         switch percent {
-        case ..<13: return "battery.0percent"
+        // Not battery.0percent: its empty outline reads as "no battery". A red sliver says "low".
+        case ..<13: return "battery.25percent"
         case ..<38: return "battery.25percent"
         case ..<63: return "battery.50percent"
         case ..<88: return "battery.75percent"
@@ -42,7 +43,7 @@ struct BatterySnapshot: Equatable, Sendable {
     var tint: Color {
         if isCharging || isPluggedIn { return .green }
         if percent <= 10 { return .red }
-        if percent <= 20 { return .orange }
+        if percent <= 20 { return .yellow }
         return .white
     }
 
@@ -127,7 +128,7 @@ final class BatteryMonitor: NSObject {
             ))
         } else if !new.isPluggedIn, let threshold = [20, 10].first(where: { new.percent <= $0 && old.percent > $0 }) {
             onEvent?(ActivityEvent(
-                symbol: "battery.25percent", tint: threshold == 10 ? .red : .orange,
+                symbol: "battery.25percent", tint: threshold == 10 ? .red : .yellow,
                 title: "Low Battery", detail: new.timeText, trailing: "\(new.percent)%", tab: .home,
                 alertDuration: 4
             ))

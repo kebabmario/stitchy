@@ -51,8 +51,72 @@ final class BluetoothMonitor: NSObject {
             disconnectNotes[info.id] = device.register(forDisconnectNotification: self, selector: #selector(didDisconnect(_:device:)))
             if announcing {
                 onEvent?(ActivityEvent(symbol: info.symbol, tint: .blue, title: info.name, detail: "Connected", tab: .home))
+                if Self.isAudio(info) { announceBattery(of: info) }
             }
         }
+    }
+
+    // MARK: Headphone battery
+
+    nonisolated static func isAudio(_ d: Device) -> Bool {
+        d.symbol.contains("airpods") || d.symbol.contains("beats") || d.symbol.contains("headphones")
+    }
+
+    /// AirPods/Beats report battery a moment after connecting; macOS exposes it
+    /// through `system_profiler SPBluetoothDataType` (public tool, read-only).
+    private func announceBattery(of device: Device) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let levels = await Self.batteryLevels(named: device.name), let self else { return }
+            self.onEvent?(ActivityEvent(symbol: device.symbol, tint: levels.lowest <= 20 ? .red : .green, title: device.name,
+                                        detail: levels.text, trailing: "\(levels.lowest)%", tab: .home))
+        }
+    }
+
+    struct BatteryLevels: Equatable {
+        var left: Int?, right: Int?, caseLevel: Int?, main: Int?
+        var lowest: Int { [left, right, main].compactMap { $0 }.min() ?? caseLevel ?? 0 }
+        var text: String {
+            var parts: [String] = []
+            if let left { parts.append("L \(left)%") }
+            if let right { parts.append("R \(right)%") }
+            if let main { parts.append("\(main)%") }
+            if let caseLevel { parts.append("Case \(caseLevel)%") }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    nonisolated static func batteryLevels(named name: String) async -> BatteryLevels? {
+        let json: Data? = await withCheckedContinuation { c in
+            DispatchQueue.global(qos: .utility).async {
+                let p = Process(), pipe = Pipe()
+                p.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+                p.arguments = ["SPBluetoothDataType", "-json"]
+                p.standardOutput = pipe
+                p.standardError = FileHandle.nullDevice
+                do { try p.run() } catch { c.resume(returning: nil); return }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                c.resume(returning: data)
+            }
+        }
+        return json.flatMap { parseBattery($0, name: name) }
+    }
+
+    /// Reads "device_batteryLevel*" for the named connected device.
+    nonisolated static func parseBattery(_ data: Data, name: String) -> BatteryLevels? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let controllers = root["SPBluetoothDataType"] as? [[String: Any]] else { return nil }
+        for controller in controllers {
+            for entry in controller["device_connected"] as? [[String: Any]] ?? [] {
+                guard let props = entry[name] as? [String: Any] else { continue }
+                func level(_ key: String) -> Int? { (props[key] as? String).flatMap { Int($0.filter(\.isNumber)) } }
+                let levels = BatteryLevels(left: level("device_batteryLevelLeft"), right: level("device_batteryLevelRight"),
+                                           caseLevel: level("device_batteryLevelCase"), main: level("device_batteryLevelMain"))
+                return levels.text.isEmpty ? nil : levels
+            }
+        }
+        return nil
     }
 
     @objc nonisolated private func didDisconnect(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {

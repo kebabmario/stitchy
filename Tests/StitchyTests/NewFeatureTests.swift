@@ -559,3 +559,88 @@ private extension NSColor {
         #expect(DockPreviews.panelOrigin(icon: rightIcon, size: size, dock: .right, visible: visible) == CGPoint(x: 652, y: 642))
     }
 }
+
+@Suite struct DroppyHomeTests {
+    @Test func batteryLowShowsSliverNotEmpty() {
+        let low = BatterySnapshot(hasBattery: true, percent: 6)
+        #expect(low.symbol == "battery.25percent" && low.tint == .red)
+        #expect(BatterySnapshot(hasBattery: true, percent: 18).tint == .yellow)
+    }
+
+    @Test func airPodsBatteryParsing() {
+        let json = #"{"SPBluetoothDataType":[{"device_connected":[{"Ana's AirPods Pro":{"device_batteryLevelLeft":"80%","device_batteryLevelRight":"75 %","device_batteryLevelCase":"40%"}}]}]}"#
+        let levels = BluetoothMonitor.parseBattery(Data(json.utf8), name: "Ana's AirPods Pro")
+        #expect(levels?.text == "L 80% · R 75% · Case 40%")
+        #expect(levels?.lowest == 75)
+        #expect(BluetoothMonitor.parseBattery(Data(json.utf8), name: "Other") == nil)
+    }
+
+    @Test func trackedFolderSkipsPartials() {
+        #expect(FolderTracker.newEntries(["a.txt", "b.pdf", "c.crdownload", "d.part"], known: ["a.txt"]) == ["b.pdf"])
+    }
+
+    @Test func downloadDetail() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("stitchy-dl-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("Report.pdf")
+        try Data(count: 2048).write(to: f)
+        let detail = DownloadsMonitor.completionDetail(f)
+        #expect(detail.hasPrefix("Report.pdf · ") && detail.hasSuffix(" · \(dir.lastPathComponent)"))
+    }
+
+    @Test @MainActor func fileTrayActions() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("stitchy-tray-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = dir.appendingPathComponent("a.txt"), b = dir.appendingPathComponent("b.txt")
+        try Data("a".utf8).write(to: a); try Data("b".utf8).write(to: b)
+        // Copy into a folder: never overwrites, originals stay.
+        let folder = dir.appendingPathComponent("Box")
+        #expect(FileShelf.copy([a, b], into: folder, createFolder: true) == 2)
+        #expect(FileShelf.copy([a], into: folder, createFolder: false) == 1)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+        #expect(names == ["a 2.txt", "a.txt", "b.txt"])
+        #expect(FileManager.default.fileExists(atPath: a.path))
+
+        // Smaller PDF: a new file, original untouched, never overwrites.
+        let pdf = dir.appendingPathComponent("doc.pdf")
+        #expect(FileShelf.writeCombinedPDF([a], to: pdf) == 0)          // text isn't an image/PDF
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 300, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let png = dir.appendingPathComponent("p.png")
+        try rep.representation(using: .png, properties: [:])!.write(to: png)
+        #expect(FileShelf.writeCombinedPDF([png], to: pdf) == 1)
+        let small = dir.appendingPathComponent("doc smaller.pdf")
+        #expect(FileShelf.writeSmallerPDF(from: pdf, to: small)?.contains("→") == true)
+        #expect(FileShelf.writeSmallerPDF(from: pdf, to: small) == nil)
+
+        // Pinned items survive Clear.
+        let key = "data.shelfPinned"
+        let saved = UserDefaults.standard.stringArray(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+        UserDefaults.standard.removeObject(forKey: key)
+        let shelf = FileShelf()
+        shelf.add([a, b])
+        shelf.togglePin(shelf.items[0])
+        shelf.clear()
+        #expect(shelf.items.map(\.url.lastPathComponent) == ["a.txt"])
+        shelf.togglePin(shelf.items[0])
+    }
+}
+
+@Suite struct LockScreenAndBubbleTests {
+    @Test func depthClockFormat() {
+        var c = DateComponents(); c.year = 2026; c.month = 1; c.day = 2; c.hour = 16; c.minute = 4
+        let date = Calendar(identifier: .gregorian).date(from: c)!
+        #expect(DepthArtwork.clock(date, locale: Locale(identifier: "en_US")) == "4:04")
+        #expect(DepthArtwork.clock(date, locale: Locale(identifier: "en_GB")) == "16:04")
+    }
+
+    @Test func lockScreenLyricLines() {
+        let lines: [LyricsService.Line] = [.init(time: 0, text: "One"), .init(time: 5, text: ""), .init(time: 10, text: "Three")]
+        let (cur, next) = LockScreenNowPlaying.lines(.synced(lines), at: 1)
+        #expect(cur == "One" && next == "Three")
+        #expect(LockScreenNowPlaying.lines(.notFound, at: 1) == (nil, nil))
+    }
+}

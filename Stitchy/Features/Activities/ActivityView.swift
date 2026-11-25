@@ -7,11 +7,12 @@ struct ActivityView: View {
     @Environment(ActivityFeed.self) private var feed
     @Environment(AppSettings.self) private var settings
     @Environment(AIUsageMonitor.self) private var ai
+    @Environment(AgentActivityMonitor.self) private var agents
 
     var body: some View {
         IslandScroll(axis: .vertical) {
             VStack(alignment: .leading, spacing: DS.Space.s) {
-                if !downloads.downloads.isEmpty || settings.aiUsageEnabled {
+                if !downloads.downloads.isEmpty || settings.aiUsageEnabled || agents.live != nil {
                     HStack {
                         SectionLabel("Live")
                         Spacer()
@@ -22,6 +23,7 @@ struct ActivityView: View {
                     if settings.downloadsEnabled, !downloads.accessDenied {
                         ForEach(downloads.downloads) { DownloadCard(download: $0) }
                     }
+                    if let session = agents.live, settings.agentActivityEnabled { AgentLiveCard(session: session) }
                     if settings.aiUsageEnabled { AIUsageSection() }
                 }
 
@@ -70,6 +72,26 @@ struct ActivityView: View {
                               detail: "Claude Code and Codex usage from local logs.", action: "Turn On") {
                     settings.aiUsageEnabled = true
                     ai.refresh()
+                }
+            }
+        }
+    }
+}
+
+/// What a coding agent is doing right now (tool and file name only).
+private struct AgentLiveCard: View {
+    let session: AgentActivityMonitor.Session
+
+    var body: some View {
+        Card(icon: AppIcons.icon(session.agent.appName).map(CardIcon.app) ?? .symbol("sparkle", .orange),
+             app: session.project.isEmpty ? session.agent.rawValue : "\(session.agent.rawValue) · \(session.project)", time: nil) {
+            HStack(spacing: 6) {
+                LoadingRing(color: .orange, animating: true).frame(width: 12, height: 12)
+                Text(session.status).font(DS.body.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                TimelineView(.periodic(from: .timelineAnchor, by: 1)) { context in
+                    Text(context.date.timeIntervalSince(session.started).clockStringFloor)
+                        .font(DS.numerals(11, weight: .medium)).foregroundStyle(Color.secondaryText)
                 }
             }
         }

@@ -175,7 +175,8 @@ final class IslandWindowController: NSObject {
     /// The island's target shape in screen coordinates (bottom-left origin).
     private var islandRect: NSRect {
         let mode = services.islandMode
-        let size = services.islandSize(mode)
+        var size = services.islandSize(mode)
+        size.width += 2 * services.bubbleExtent   // bubbles beside the island are clickable too
         let frame = panel.frame
         return NSRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height, width: size.width, height: size.height)
     }

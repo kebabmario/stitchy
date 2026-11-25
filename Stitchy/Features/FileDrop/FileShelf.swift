@@ -25,6 +25,8 @@ final class FileShelf: NSObject, NSSharingServiceDelegate {
     }
 
     private(set) var items: [Item] = []
+    /// Pinned files survive Clear and relaunches (paths kept in user data).
+    private(set) var pinned: Set<URL> = Set((UserDefaults.standard.stringArray(forKey: "data.shelfPinned") ?? []).map { URL(fileURLWithPath: $0) })
     @ObservationIgnored var onAdd: ((Int) -> Void)?
     @ObservationIgnored private var icons: [URL: NSImage] = [:]
     /// QuickLook thumbnails, generated asynchronously when previews are on.
@@ -195,11 +197,88 @@ final class FileShelf: NSObject, NSSharingServiceDelegate {
         thumbnails[item.url] = nil
     }
 
-    /// Empties the shelf. Files on disk are untouched.
+    /// Empties the shelf except pinned items. Files on disk are untouched.
     func clear() {
-        items.removeAll()
-        icons.removeAll()
-        thumbnails.removeAll()
+        items.removeAll { !pinned.contains($0.url) }
+        icons = icons.filter { pinned.contains($0.key) }
+        thumbnails = thumbnails.filter { pinned.contains($0.key) }
+    }
+
+    func isPinned(_ item: Item) -> Bool { pinned.contains(item.url) }
+
+    func togglePin(_ item: Item) {
+        if pinned.contains(item.url) { pinned.remove(item.url) } else { pinned.insert(item.url) }
+        UserDefaults.standard.set(pinned.map(\.path).sorted(), forKey: "data.shelfPinned")
+    }
+
+    /// Puts pinned files (that still exist) back on the shelf at launch.
+    func restorePinned() {
+        let existing = pinned.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existing.isEmpty else { return }
+        let known = Set(items.map(\.url))
+        items.insert(contentsOf: existing.subtracting(known).sorted { $0.path < $1.path }.map { Item(url: $0) }, at: 0)
+    }
+
+    // MARK: File tray actions (new files only; originals are never moved or changed)
+
+    func isZip(_ item: Item) -> Bool { item.url.pathExtension.lowercased() == "zip" }
+    func isPDF(_ item: Item) -> Bool { item.url.pathExtension.lowercased() == "pdf" }
+    func isFolder(_ item: Item) -> Bool { (try? item.url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true && item.url.pathExtension != "app" }
+
+    /// Extracts an archive into a new folder beside it.
+    func unzip(_ item: Item) async {
+        let out = Self.uniqueURL(item.url.deletingPathExtension())
+        let ok = await Self.run("/usr/bin/ditto", ["-x", "-k", item.url.path, out.path])
+        if ok { add([out]) }
+        onTransferEvent?(ActivityEvent(symbol: ok ? "archivebox" : "exclamationmark.triangle.fill", tint: ok ? .teal : .orange,
+                                       title: ok ? "Unzipped" : "Couldn't unzip", detail: ok ? out.lastPathComponent : item.name, tab: .shelf))
+    }
+
+    /// Smaller PDF copy: images re-saved as JPEG at screen resolution (PDFKit).
+    func shrinkPDF(_ item: Item) {
+        let out = Self.uniqueURL(item.url.deletingLastPathComponent()
+            .appendingPathComponent("\(item.url.deletingPathExtension().lastPathComponent) smaller").appendingPathExtension("pdf"))
+        let result = Self.writeSmallerPDF(from: item.url, to: out)
+        if result != nil { add([out]) }
+        onTransferEvent?(ActivityEvent(symbol: result != nil ? "doc.richtext" : "exclamationmark.triangle.fill", tint: result != nil ? .red : .orange,
+                                       title: result != nil ? "Smaller PDF saved" : "Couldn't shrink PDF", detail: result ?? item.name, tab: .shelf))
+    }
+
+    nonisolated static func writeSmallerPDF(from source: URL, to out: URL) -> String? {
+        guard !FileManager.default.fileExists(atPath: out.path), let doc = PDFDocument(url: source),
+              doc.write(to: out, withOptions: [.saveImagesAsJPEGOption: true, .optimizeImagesForScreenOption: true]) else { return nil }
+        func size(_ u: URL) -> String {
+            ByteCountFormatter.string(fromByteCount: Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0), countStyle: .file)
+        }
+        return "\(size(source)) → \(size(out))"
+    }
+
+    /// Copies the shelf's files into a new folder beside the first one.
+    func gatherIntoFolder() {
+        let sources = items.map(\.url).filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard let first = sources.first else { return }
+        let folder = Self.uniqueURL(first.deletingLastPathComponent().appendingPathComponent("Gathered Files"))
+        let copied = Self.copy(sources, into: folder, createFolder: true)
+        if copied > 0 { add([folder]) }
+        onTransferEvent?(ActivityEvent(symbol: "folder.fill.badge.plus", tint: .blue, title: copied > 0 ? "Gathered \(copied) files" : "Couldn't gather files",
+                                       detail: copied > 0 ? "\(folder.lastPathComponent) (copies; originals stay put)" : nil, tab: .shelf))
+    }
+
+    /// Copies dropped files into a folder on the shelf.
+    func copy(_ urls: [URL], intoFolder folder: Item) {
+        let n = Self.copy(urls, into: folder.url, createFolder: false)
+        onTransferEvent?(ActivityEvent(symbol: "folder.fill", tint: .blue, title: n > 0 ? "Copied \(n) to \(folder.name)" : "Couldn't copy", tab: .shelf))
+    }
+
+    /// Returns how many were copied. Never overwrites: name clashes get " 2".
+    nonisolated static func copy(_ urls: [URL], into folder: URL, createFolder: Bool) -> Int {
+        let fm = FileManager.default
+        if createFolder { try? fm.createDirectory(at: folder, withIntermediateDirectories: false) }
+        var n = 0
+        for u in urls where u.standardizedFileURL != folder.standardizedFileURL {
+            if (try? fm.copyItem(at: u, to: uniqueURL(folder.appendingPathComponent(u.lastPathComponent)))) != nil { n += 1 }
+        }
+        return n
     }
 
     func exists(_ item: Item) -> Bool {

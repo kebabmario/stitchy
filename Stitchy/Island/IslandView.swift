@@ -12,6 +12,19 @@ struct IslandRootView: View {
     }
 }
 
+extension IslandView {
+    /// Bubble `index` (0 = right, 1 = left), pushed just outside the island.
+    @ViewBuilder func bubble(at index: Int, side: CGFloat, geometry: IslandGeometry) -> some View {
+        let bubbles = services.bubbleActivities
+        if bubbles.indices.contains(index) {
+            IslandBubble(activity: bubbles[index], geometry: geometry)
+                .offset(x: side * (IslandBubble.size(for: geometry).width + IslandBubble.gap))
+                .transition(.scale(scale: 0.4, anchor: side > 0 ? .leading : .trailing).combined(with: .opacity))
+                .id(bubbles[index].id)
+        }
+    }
+}
+
 /// The single black notch that morphs between compact, live activity,
 /// alert, HUD and expanded.
 ///
@@ -57,7 +70,12 @@ struct IslandView: View {
                 VStack(spacing: 0) {
                     CompactIslandView(activities: activities, notchWidth: geometry.notchWidth)
                         .frame(height: geometry.notchHeight)
-                    if mode == .liveLyrics { CompactLyricLine().frame(height: IslandGeometry.lyricStrip, alignment: .top) }
+                    if mode == .liveLyrics {
+                        Group {
+                            if case .agent? = activities.first?.kind { AgentStripLine() } else { CompactLyricLine() }
+                        }
+                        .frame(height: IslandGeometry.lyricStrip, alignment: .top)
+                    }
                 }
                 .padding(.horizontal, inset)
                 .transition(.blurReplace.animation(.easeOut(duration: 0.2)))
@@ -75,6 +93,9 @@ struct IslandView: View {
         .onTapGesture {
             if !model.isExpanded { model.handleCompactClick() }
         }
+        .overlay(alignment: .topTrailing) { bubble(at: 0, side: 1, geometry: geometry) }
+        .overlay(alignment: .topLeading) { bubble(at: 1, side: -1, geometry: geometry) }
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: services.bubbleActivities.map(\.id))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Stitchy")
     }

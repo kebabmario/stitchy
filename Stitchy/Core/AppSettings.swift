@@ -144,6 +144,8 @@ final class AppSettings {
     var mirrorOtherApps = false { didSet { save(mirrorOtherApps, "mirrorOtherApps") } }
 
     // Activity visibility in the compact island
+    /// Extra live activities appear as bubbles beside the island.
+    var activityBubbles = true { didSet { save(activityBubbles, "activityBubbles") } }
     var compactActivities = true { didSet { save(compactActivities, "compactActivities") } }
     var showTimerActivity = true { didSet { save(showTimerActivity, "showTimerActivity") } }
     var showMusicActivity = true { didSet { save(showMusicActivity, "showMusicActivity") } }
@@ -173,6 +175,8 @@ final class AppSettings {
     var shelfPreviews = true { didSet { save(shelfPreviews, "shelfPreviews") } }
     /// Droppy-style: new screenshots appear on the shelf. Opt-in.
     var screenshotsToShelf = false { didSet { save(screenshotsToShelf, "screenshotsToShelf") } }
+    /// Tracked folder: new files in it land on the shelf. Empty = off.
+    var trackedFolder = "" { didSet { save(trackedFolder, "trackedFolder") } }
     /// DockDoor-style window previews on Dock hover. Opt-in (Accessibility + Screen Recording).
     var dockPreviewsEnabled = false { didSet { save(dockPreviewsEnabled, "dockPreviewsEnabled") } }
     /// Keyboard window snapping. Opt-in (Accessibility).
@@ -180,7 +184,7 @@ final class AppSettings {
     /// Alerts when an Xcode build finishes (reads DerivedData logs). Opt-in.
     var xcodeBuildAlerts = false { didSet { save(xcodeBuildAlerts, "xcodeBuildAlerts") } }
     /// Live Claude Code / Codex activity from their local session logs. Opt-in.
-    var agentActivityEnabled = false { didSet { save(agentActivityEnabled, "agentActivityEnabled") } }
+    var agentActivityEnabled = true { didSet { save(agentActivityEnabled, "agentActivityEnabled") } }
     /// Break reminders after active use. Opt-in.
     var breakReminders = false { didSet { save(breakReminders, "breakReminders") } }
     var breakMinutes = 50.0 { didSet { save(breakMinutes, "breakMinutes") } }
@@ -287,6 +291,7 @@ final class AppSettings {
         mirrorHidePreviews = b("mirrorHidePreviews", false)
         mirrorOtherApps = b("mirrorOtherApps", false)
         compactActivities = b("compactActivities", true)
+        activityBubbles = b("activityBubbles", true)
         showTimerActivity = b("showTimerActivity", true)
         showMusicActivity = b("showMusicActivity", true)
         showTransferActivity = b("showTransferActivity", true)
@@ -303,10 +308,16 @@ final class AppSettings {
         clipboardExcludedApps = defaults.stringArray(forKey: "clipboardExcludedApps") ?? Self.defaultExcludedApps
         shelfPreviews = b("shelfPreviews", true)
         screenshotsToShelf = b("screenshotsToShelf", false)
+        trackedFolder = s("trackedFolder")
         dockPreviewsEnabled = b("dockPreviewsEnabled", false)
         windowSnapEnabled = b("windowSnapEnabled", false)
         xcodeBuildAlerts = b("xcodeBuildAlerts", false)
-        agentActivityEnabled = b("agentActivityEnabled", false)
+        agentActivityEnabled = b("agentActivityEnabled", true)
+        // Coding agents became a regular live activity: switch it on once for existing setups.
+        if !defaults.bool(forKey: "migratedAgentActivity1") {
+            defaults.set(true, forKey: "migratedAgentActivity1")
+            agentActivityEnabled = true
+        }
         breakReminders = b("breakReminders", false)
         breakMinutes = n("breakMinutes", 50)
         meetingReminderMinutes = n("meetingReminderMinutes", 5)

@@ -17,7 +17,7 @@ struct IslandActivity: Identifiable {
         case weather
         case focus
         case call
-        case agent(String)
+        case agent(status: String, agent: AgentActivityMonitor.Agent, started: Date)
     }
 
     let id: String
@@ -91,7 +91,7 @@ extension AppServices {
                               tint: .green, title: call.title, tab: .home))
         }
         if settings.agentActivityEnabled, let session = agents.live {
-            list.append(.init(id: "agent", kind: .agent(session.status), priority: 50,
+            list.append(.init(id: "agent", kind: .agent(status: session.status, agent: session.agent, started: session.started), priority: 50,
                               symbol: session.agent == .claude ? "sparkle" : "chevron.left.forwardslash.chevron.right", tint: .orange,
                               title: session.project.isEmpty ? session.agent.rawValue : "\(session.agent.rawValue) · \(session.project)",
                               tab: .activity))
@@ -124,12 +124,16 @@ extension AppServices {
     func islandSize(_ mode: IslandGeometry.Mode) -> CGSize {
         let geometry = island.geometry
         var size = geometry.size(mode, tab: island.tab)
-        if case .music = compactActivities.first?.kind {
+        switch compactActivities.first?.kind {
+        case .music?:
             switch mode {
-            case .live: size.width = geometry.compact.width + 76
-            case .liveLyrics: size.width = geometry.compact.width + 130
+            case .live: size.width = geometry.compact.width + 52
+            case .liveLyrics: size.width = geometry.compact.width + 96
             default: break
             }
+        case .agent?:
+            if mode == .liveLyrics { size.width = geometry.compact.width + 120 }   // room for "project · step"
+        default: break
         }
         return size
     }
@@ -137,7 +141,9 @@ extension AppServices {
     /// The island's current mode; shared by the view and hit-testing.
     var islandMode: IslandGeometry.Mode {
         let live = compactActivities
+        // The strip under the island: the current lyric for music, the current step for a coding agent.
         let lyricStrip: Bool = {
+            if case .agent = live.first?.kind { return true }
             guard settings.lyricsEnabled, settings.compactLyrics, case .music = live.first?.kind,
                   case .synced = lyrics.state else { return false }
             return true
@@ -148,5 +154,17 @@ extension AppServices {
     /// What the compact island shows (respects the master switch).
     var compactActivities: [IslandActivity] {
         settings.compactActivities ? activities : []
+    }
+
+    /// Second and third live activities, shown as bubbles beside the island
+    /// (right, then left) while the first keeps the island.
+    var bubbleActivities: [IslandActivity] {
+        guard settings.activityBubbles, !island.isExpanded, island.alert == nil, island.hud == nil else { return [] }
+        return Array(compactActivities.dropFirst().prefix(2))
+    }
+
+    /// Extra width on each side taken by bubbles (for hit-testing).
+    var bubbleExtent: CGFloat {
+        bubbleActivities.isEmpty ? 0 : IslandBubble.size(for: island.geometry).width + IslandBubble.gap
     }
 }

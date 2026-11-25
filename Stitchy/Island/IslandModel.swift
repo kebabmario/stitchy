@@ -84,7 +84,7 @@ struct IslandGeometry: Equatable {
     var compact: CGSize { CGSize(width: notchWidth + 2 * Self.shoulder, height: notchHeight) }
     var compactHover: CGSize { CGSize(width: compact.width + 12, height: notchHeight + 4) }
     /// Live activities sit on both sides of the notch, like the Dynamic Island.
-    var compactLive: CGSize { CGSize(width: compact.width + 128, height: notchHeight) }
+    var compactLive: CGSize { CGSize(width: compact.width + 100, height: notchHeight) }
     var alert: CGSize { CGSize(width: max(compact.width + 170, 360), height: notchHeight + 30) }
     var hud: CGSize { CGSize(width: compact.width + 150, height: notchHeight) }
 
