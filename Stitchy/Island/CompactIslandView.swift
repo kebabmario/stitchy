@@ -347,3 +347,65 @@ struct AgentStripLine: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: session?.status)
     }
 }
+
+/// The Face ID-style card: a big glyph and a short status line.
+struct AuthCardView: View {
+    let card: AuthCard
+    let geometry: IslandGeometry
+
+    private var title: String {
+        switch (card.kind, card.phase) {
+        case (.touchID, .scanning): SystemAuth.hasTouchID ? "Touch ID" : "Password"
+        case (.touchID, .success), (.unlock, .success): "Unlocked"
+        case (.touchID, .failed): "Not unlocked"
+        case (.unlock, _): "Unlocking"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Group {
+                switch card.kind {
+                case .touchID: TouchIDGlyph(phase: card.phase, size: 50)
+                case .unlock: UnlockGlyph(opened: card.phase == .success)
+                }
+            }
+            .frame(width: 88, height: 88)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(card.phase == .failed ? .red : .white.opacity(0.8))
+                .contentTransition(.opacity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Notch style: keep the glyph below the physical notch area.
+        .padding(.top, geometry.style == .notch ? geometry.notchHeight * 0.55 : 0)
+        .animation(.spring(response: 0.36, dampingFraction: 0.7), value: card)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+    }
+}
+
+/// A lock that springs open, with a green ring drawing around it.
+struct UnlockGlyph: View {
+    let opened: Bool
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.12), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: opened ? 1 : 0)
+                .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: settings.reduceMotion ? 0 : 0.5), value: opened)
+            Image(systemName: opened ? "lock.open.fill" : "lock.fill")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(opened ? Color.green : .white)
+                .contentTransition(.symbolEffect(.replace.byLayer.upUp))
+                .symbolEffect(.bounce, value: opened)
+                .scaleEffect(opened ? 1.06 : 1)
+                .animation(.spring(response: 0.38, dampingFraction: 0.55), value: opened)
+        }
+        .padding(4)
+    }
+}

@@ -60,6 +60,13 @@ struct IslandView: View {
                         .id(alert.id)
                         .transition(.blurReplace.animation(.easeOut(duration: 0.22)))
                 }
+            case .auth:
+                if let card = model.authCard {
+                    AuthCardView(card: card, geometry: geometry)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.7)).animation(.spring(response: 0.42, dampingFraction: 0.7).delay(0.05)),
+                            removal: .opacity.combined(with: .scale(scale: 0.85)).animation(.easeIn(duration: 0.14))))
+                }
             case .hud:
                 if let hud = model.hud {
                     HUDIslandView(event: hud, notchWidth: geometry.notchWidth)

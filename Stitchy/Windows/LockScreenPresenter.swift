@@ -25,6 +25,7 @@ final class LockScreenPresenter {
     private let connection: Int32
     private let space: Int32
     private let addWindows: AddWindowsToSpace
+    private let showSpaces: ShowSpaces
     private(set) var attachedWindows: Set<Int> = []
 
     static let shared = LockScreenPresenter()
@@ -44,8 +45,13 @@ final class LockScreenPresenter {
         let levelResult = unsafeBitCast(setLevel, to: SpaceSetAbsoluteLevel.self)(connection, space, Self.lockScreenLevel)
         let showResult = unsafeBitCast(show, to: ShowSpaces.self)(connection, [space] as CFArray)
         addWindows = unsafeBitCast(add, to: AddWindowsToSpace.self)
+        showSpaces = unsafeBitCast(show, to: ShowSpaces.self)
         islandLog.info("lockscreen: space \(self.space, privacy: .public) level=\(levelResult, privacy: .public) show=\(showResult, privacy: .public)")
     }
+
+    /// Shows the lock-screen space again (macOS may hide it when the login
+    /// prompt wakes, e.g. after a key press).
+    func reshowSpace() { _ = showSpaces(connection, [space] as CFArray) }
 
     /// Moves the window into the lock-screen space. Returns false on error.
     @discardableResult

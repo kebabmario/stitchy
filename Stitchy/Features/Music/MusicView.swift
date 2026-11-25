@@ -356,9 +356,9 @@ private struct LyricsExpandedView: View {
                             Color.clear.frame(height: geo.size.height * 0.42)
                             ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                                 Text(line.text.isEmpty ? "♪" : line.text)
-                                    .font(.system(size: i == current ? 19 : 16, weight: i == current ? .bold : .semibold))
-                                    .foregroundStyle(.white.opacity(i == current ? 1 : (i < (current ?? 0) ? 0.3 : 0.55)))
-                                    .blur(radius: i == current ? 0 : 0.3)
+                                    .font(.system(size: 19, weight: .bold))
+                                    .tracking(-0.3)
+                                    .modifier(LyricLineStyle(index: i, current: current))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(i)
                                     .contentShape(Rectangle())

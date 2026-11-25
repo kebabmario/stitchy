@@ -644,3 +644,14 @@ private extension NSColor {
         #expect(LockScreenNowPlaying.lines(.notFound, at: 1) == (nil, nil))
     }
 }
+
+@Suite struct LockScreenLayoutTests {
+    @Test func playerSitsLowAndCentred() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let f = LockScreenArtController.playerFrame(in: screen)
+        #expect(f.midX == screen.midX)
+        // Bottom edge (AppKit y-up) is 95% down from the top, like Apple's full-screen art layout.
+        #expect(abs((screen.maxY - f.minY) - 900 * 0.95) < 0.5)
+        #expect(f.width <= 660 && f.height == 290)
+    }
+}

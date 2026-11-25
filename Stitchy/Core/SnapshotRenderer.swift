@@ -93,11 +93,42 @@ enum SnapshotRenderer {
         render("08-island-expanded")
         services.settings.style = .notch
         model.collapse()
+        model.showAuth(.scanning)
+        render("13-touchid-card")
+        model.showAuth(.success)
+        render("14-touchid-success")
+        RunLoop.main.run(until: Date().addingTimeInterval(1.6))
+        model.collapse()
         model.isScreenLocked = true
         model.expand(.click, tab: .music)
         render("11-lock-screen")
         model.collapse()
         model.isScreenLocked = false
+        // Full-screen lock screen music at MacBook size, over a stand-in wallpaper.
+        let lockState = LockScreenState()
+        if let photo = NSImage(contentsOfFile: "/Library/User Pictures/Animals/Eagle.heic") ?? NSImage(contentsOfFile: "/Library/User Pictures/Flowers/Dahlia.heic") {
+            services.nowPlaying.loadPreview(.init(id: "p2", title: "Midnight Drive", artist: "Neon Coast", album: "Afterglow", duration: 214), artwork: photo)
+        }
+        let lockView = ZStack {
+            LinearGradient(colors: [Color(red: 0.1, green: 0.2, blue: 0.4), Color(red: 0.3, green: 0.2, blue: 0.4)], startPoint: .top, endPoint: .bottom)
+            VStack { Spacer(); Circle().fill(.white.opacity(0.3)).frame(width: 64, height: 64); Text("Your Name").foregroundStyle(.white)
+                     RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.2)).frame(width: 200, height: 26).padding(.bottom, 90) }
+            LockScreenArtView().environment(lockState)
+            GeometryReader { g in
+                let f = LockScreenArtController.playerFrame(in: CGRect(origin: .zero, size: g.size))
+                LockScreenPlayerView().environment(lockState).frame(width: f.width, height: f.height)
+                    .position(x: f.midX, y: g.size.height - f.midY)   // AppKit y-up → SwiftUI y-down
+            }
+            VStack { Spacer(); Circle().fill(.white.opacity(0.35)).frame(width: 64, height: 64); Text("Your Name").foregroundStyle(.white)
+                     RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.25)).frame(width: 200, height: 26).padding(.bottom, 90) }
+        }
+        .frame(width: 1440, height: 900)
+        .stitchyEnvironment(services)
+        let lockRenderer = ImageRenderer(content: lockView)
+        if let image = lockRenderer.nsImage, let tiff = image.tiffRepresentation,
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("12-lock-screen-full.png"))
+        }
         print("Snapshots written to \(dir.path)")
         return true
     }

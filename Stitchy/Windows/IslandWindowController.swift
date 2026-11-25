@@ -31,6 +31,7 @@ final class IslandWindowController: NSObject {
     /// Hidden because the frontmost app is in full screen (setting).
     private var hiddenForFullScreen = false
     private let lockObserver = ScreenLockObserver()
+    private lazy var lockArt = LockScreenArtController(services: services)
 
     /// Extra slack around the island so tiny pointer jitter at the edge
     /// doesn't flicker between states (Settings › Hover sensitivity).
@@ -77,6 +78,14 @@ final class IslandWindowController: NSObject {
         panel.orderFrontRegardless()
         installMonitors()
         if settings.lockScreenIsland { LockScreenPresenter.shared?.attach(panel) }
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "--preview-lockscreen") {
+            let lyrics = args.indices.contains(i + 1) && args[i + 1] == "lyrics"
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))   // let Now Playing load the track and cover
+                self?.lockArt.previewOnDesktop(lyrics: lyrics)
+            }
+        }
     }
 
     /// Locked: collapse, keep the island visible (lock-screen space), and let
@@ -89,6 +98,8 @@ final class IslandWindowController: NSObject {
             hiddenForFullScreen = false
             panel.orderFrontRegardless()
         }
+        lockArt.update(locked: locked)
+        if !locked, isVisible { model.showUnlocked() }
     }
 
     func hide() {

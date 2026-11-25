@@ -127,6 +127,8 @@ final class AppSettings {
     var compactLyrics = true { didSet { save(compactLyrics, "compactLyrics") } }
     /// Show the island on the lock screen (private SkyLight API).
     var lockScreenIsland = true { didSet { save(lockScreenIsland, "lockScreenIsland") } }
+    /// Full-screen music art on the lock screen (needs the lock-screen island).
+    var lockScreenArt = true { didSet { save(lockScreenArt, "lockScreenArt") } }
     /// The user's own Spotify developer app Client ID (public, not a secret).
     var spotifyClientID = "" { didSet { save(spotifyClientID, "spotifyClientID") } }
     /// Off until the user picks a location or city in the Weather tab.
@@ -280,6 +282,7 @@ final class AppSettings {
         shakeToShelf = b("shakeToShelf", true)
         compactLyrics = b("compactLyrics", true)
         lockScreenIsland = b("lockScreenIsland", true)
+        lockScreenArt = b("lockScreenArt", true)
         spotifyClientID = s("spotifyClientID")
         weatherEnabled = b("weatherEnabled", false)
         weatherFahrenheit = b("weatherFahrenheit", Locale.current.measurementSystem == .us)

@@ -98,6 +98,7 @@ struct IslandSettingsView: View {
                 slider("Distance from top", $settings.topGap, 0...40, "pt")
                 slider("Horizontal offset", $settings.horizontalOffset, -300...300, "pt")
                 Toggle("Show on the Lock Screen", isOn: $settings.lockScreenIsland)
+                Toggle("Full-screen music on the Lock Screen", isOn: $settings.lockScreenArt).disabled(!settings.lockScreenIsland)
                 Text("Uses private macOS window-server APIs (adapted from SkyLightWindow, MIT). While locked, the island shows only Now Playing, lyrics and the time: no notes, clipboard, files or settings. Turning this off takes effect after restarting Stitchy. A future macOS update may break it; Stitchy then just hides it.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {

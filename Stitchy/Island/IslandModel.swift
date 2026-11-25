@@ -98,7 +98,13 @@ struct IslandGeometry: Equatable {
         CGSize(width: expandedWidth + 2 * Self.expandedShoulder, height: expandedHeight(for: tab))
     }
 
-    enum Mode: Equatable { case compact, hover, live, liveLyrics, alert, hud, expanded }
+    enum Mode: Equatable { case compact, hover, live, liveLyrics, alert, hud, auth, expanded }
+
+    /// Face ID-style card for Touch ID prompts and unlocking: a rounded square
+    /// hanging from the top edge (notch) or floating (island).
+    var authCard: CGSize {
+        style == .island ? CGSize(width: 150, height: 150) : CGSize(width: 156, height: notchHeight + 118)
+    }
 
     func size(_ mode: Mode, tab: IslandTab) -> CGSize {
         switch mode {
@@ -108,18 +114,20 @@ struct IslandGeometry: Equatable {
         case .liveLyrics: CGSize(width: compactLive.width + 40, height: notchHeight + Self.lyricStrip)
         case .alert: alert
         case .hud: hud
+        case .auth: authCard
         case .expanded: expanded(for: tab)
         }
     }
 
     func shoulder(_ mode: Mode) -> CGFloat {
         guard style == .notch else { return 0 }
-        return mode == .expanded ? Self.expandedShoulder : Self.shoulder
+        return mode == .expanded || mode == .auth ? Self.expandedShoulder : Self.shoulder
     }
 
     func bottomRadius(_ mode: Mode) -> CGFloat {
         switch mode {
         case .expanded: 42   // iOS 26 / 18 Pro Max-style continuous corners
+        case .auth: style == .island ? 46 : 40
         case .alert: style == .island ? (notchHeight + 30) / 2 : 22
         case .liveLyrics: style == .island ? (notchHeight + Self.lyricStrip) / 2 : 18
         default: style == .island ? notchHeight / 2 : min(notchHeight * 0.42, 14)
@@ -129,7 +137,7 @@ struct IslandGeometry: Equatable {
     /// Notch: flat top. Island: fully rounded pill / card.
     func topRadius(_ mode: Mode) -> CGFloat {
         guard style == .island else { return 0 }
-        return mode == .expanded ? 42 : bottomRadius(mode)
+        return mode == .expanded ? 42 : mode == .auth ? 46 : bottomRadius(mode)
     }
 }
 
@@ -143,6 +151,9 @@ final class IslandModel {
     private(set) var tab: IslandTab = .home
     private(set) var alert: ActivityEvent?
     private(set) var hud: HUDEvent?
+    /// Touch ID prompt or unlock in progress (shown as the Face ID-style card).
+    private(set) var authCard: AuthCard?
+    @ObservationIgnored private var authTask: Task<Void, Never>?
     var isHovering = false
     var isFileDragActive = false
     var isDropTargeted = false
@@ -182,6 +193,7 @@ final class IslandModel {
 
     func mode(hasLiveActivity: Bool, lyricStrip: Bool = false) -> IslandGeometry.Mode {
         if isExpanded { return .expanded }
+        if authCard != nil { return .auth }
         if alert != nil { return .alert }
         if hud != nil { return .hud }
         if hasLiveActivity { return lyricStrip ? .liveLyrics : .live }
@@ -299,19 +311,43 @@ final class IslandModel {
         }
     }
 
-    /// Touch ID animation: a held HUD while macOS shows its prompt, then the
-    /// result. Expanded pages (the private gate) draw their own glyph.
+    /// Touch ID: the card grows while macOS shows its prompt, then shows the
+    /// result. Expanded pages (the private gate) draw their own glyph instead.
     func showAuth(_ phase: SystemAuth.Phase) {
-        let symbol = SystemAuth.hasTouchID ? "touchid" : "lock.fill"
+        guard !isExpanded else { return }
         switch phase {
         case .scanning:
-            showHUD(HUDEvent(symbol: symbol, title: SystemAuth.hasTouchID ? "Touch ID" : "Password", auth: .scanning), hold: nil)
-        case .success:
-            showHUD(HUDEvent(symbol: "checkmark.circle.fill", tint: .green, title: "Unlocked", auth: .success), hold: 1.2)
-        case .failed:
-            // Only replace our own scanning HUD (cancel shouldn't pop a new one).
-            guard hud?.auth == .scanning else { return }
-            showHUD(HUDEvent(symbol: "xmark.circle.fill", tint: .red, title: "Not unlocked", auth: .failed), hold: 1.2)
+            presentAuth(AuthCard(kind: .touchID, phase: .scanning), hold: nil)
+        case .success, .failed:
+            guard authCard?.kind == .touchID else { return }   // a cancel never pops a new card
+            presentAuth(AuthCard(kind: .touchID, phase: phase), hold: phase == .success ? 1.1 : 1.3)
+        }
+    }
+
+    /// The Mac unlocked: a lock springs open in the card. macOS doesn't say
+    /// whether Touch ID or the password was used, only that it unlocked.
+    func showUnlocked() {
+        guard !isExpanded else { return }
+        presentAuth(AuthCard(kind: .unlock, phase: .scanning), hold: nil)
+        authTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            self?.presentAuth(AuthCard(kind: .unlock, phase: .success), hold: 1.15)
+        }
+    }
+
+    private func presentAuth(_ card: AuthCard, hold: TimeInterval?) {
+        if authCard?.kind != card.kind || hold == nil { authTask?.cancel() }
+        withAnimation(authCard == nil ? .spring(response: 0.48, dampingFraction: 0.74) : .spring(response: 0.36, dampingFraction: 0.68)) {
+            authCard = card
+            alert = nil
+            hud = nil
+        }
+        guard let hold else { return }
+        authTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(hold))
+            guard !Task.isCancelled, let self else { return }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { self.authCard = nil }
         }
     }
 
@@ -319,6 +355,12 @@ final class IslandModel {
         guard hovering != isHovering else { return }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { isHovering = hovering }
     }
+}
+
+struct AuthCard: Equatable {
+    enum Kind: Equatable { case touchID, unlock }
+    var kind: Kind
+    var phase: SystemAuth.Phase
 }
 
 /// A compact system indicator.

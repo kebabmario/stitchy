@@ -433,3 +433,22 @@ struct Chip: View {
         .accessibilityLabel(title.isEmpty ? (symbol ?? "") : title)
     }
 }
+
+/// Apple Music-style motion for a lyric line, by its distance from the current
+/// line: the current one is full size, bright and softly glowing; lines further
+/// away shrink a little, dim and soften. Animate `current` with a spring.
+struct LyricLineStyle: ViewModifier {
+    let index: Int
+    let current: Int?
+    @Environment(AppSettings.self) private var settings
+
+    func body(content: Content) -> some View {
+        let distance = current.map { abs(index - $0) } ?? 3
+        let isCurrent = distance == 0
+        content
+            .foregroundStyle(.white.opacity(isCurrent ? 1 : max(0.22, 0.5 - Double(distance) * 0.07)))
+            .scaleEffect(isCurrent || settings.reduceMotion ? 1 : max(0.9, 0.97 - CGFloat(distance) * 0.015), anchor: .leading)
+            .blur(radius: isCurrent || settings.reduceMotion ? 0 : min(CGFloat(distance) * 0.5, 2))
+            .shadow(color: .white.opacity(isCurrent ? 0.35 : 0), radius: isCurrent ? 10 : 0)
+    }
+}
