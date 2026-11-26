@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// One ongoing thing the island can show. Every feature reports its live
@@ -97,7 +98,7 @@ extension AppServices {
                               tab: .activity))
         }
         if focus.isFocused == true {
-            list.append(.init(id: "focus", kind: .focus, priority: 20, symbol: "moon.fill", tint: .indigo, title: "Focus", tab: .home))
+            list.append(.init(id: "focus", kind: .focus, priority: 20, symbol: "moon.fill", tint: .indigo, title: "Do Not Disturb", tab: .home))
         }
         if controls.isKeepingAwake {
             list.append(.init(id: "awake", kind: .keepAwake, priority: 30, symbol: "cup.and.saucer.fill",

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import SwiftUI
 
@@ -48,6 +49,10 @@ final class AppServices {
     @ObservationIgnored let mirror: NotificationMirror
     @ObservationIgnored let queue: QueueService
     @ObservationIgnored let hotkey = GlobalHotkey()
+    @ObservationIgnored let extensions = ExtensionStore()
+    @ObservationIgnored let extensionData = ExtensionDataService()
+    @ObservationIgnored let extensionAutomations = ExtensionAutomationEngine()
+    @ObservationIgnored lazy var extensionEditor = ExtensionEditorController(services: self)
     @ObservationIgnored lazy var floatingPlayer = FloatingPlayerController(services: self)
 
     init() {
@@ -71,6 +76,8 @@ final class AppServices {
         if !SnapshotRenderer.isRendering { shelf.restorePinned() }
         network.start()
         observeContinuously { [weak self] in self?.applyFeatureToggles() }
+        // Only enabled extensions with a data source poll their API.
+        observeContinuously { [weak self] in guard let self else { return }; self.extensionData.sync(with: self.extensions.extensions) }
         // Lyrics follow the current track however it was learned (launch-time
         // sync, notifications, or a player switch). Cached per song.
         observeContinuously { [weak self] in
@@ -152,6 +159,20 @@ final class AppServices {
             ))
         }
         capture.onEvent = { [weak self] in self?.post($0) }
+        extensionData.onUpdate = { [weak self] id, doc in
+            guard let self, let ext = self.extensions.extensionNamed(id) else { return }
+            self.extensionAutomations.evaluate(ext, doc: doc)
+        }
+        extensionAutomations.onAlert = { [weak self] alert, ext in
+            guard let self else { return }
+            self.post(ActivityEvent(symbol: ext.icon == ExtIconImage.rocket ? "sparkles" : ext.icon, tint: .purple, title: alert.title,
+                                    detail: alert.message.isEmpty ? ext.name : alert.message,
+                                    artwork: ExtIconImage.alertArtwork(ext), tab: .extensions, alertDuration: 5))
+            if alert.notify {
+                self.notifier.schedule(id: "ext-\(alert.automationID.uuidString)", title: alert.title,
+                                       body: alert.message.isEmpty ? ext.name : alert.message, after: 1)
+            }
+        }
         annotator.onSaved = { [weak self] url in
             self?.shelf.add([url])
             self?.post(ActivityEvent(symbol: "pencil.tip.crop.circle", tint: .pink, title: "Annotated copy saved", detail: url.lastPathComponent, tab: .shelf))

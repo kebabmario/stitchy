@@ -99,7 +99,7 @@ Status: **Done** = implemented and working; **Partial** = works but has gaps; **
 | Bluetooth list and connect/disconnect alerts | Done | |
 | Drives: mount/eject alerts, one-click eject, failure handling | Done | |
 | Mic mute for all apps | Done | |
-| Do Not Disturb toggle | Done | Through Shortcuts Stitchy creates (no public Focus API) |
+| Do Not Disturb toggle | Done | Presses the system Do Not Disturb shortcut (⌃⌥⌘D), assigned after consent; needs Accessibility (no public Focus API) |
 | Dock window previews | Done | Opt-in, Accessibility + Screen Recording |
 | Window snapping | Done | Phase B: keyboard shortcuts, halves/quarters/thirds/two-thirds/maximize/center/next display; drag-to-edge not included |
 | Pointer edge gestures, smooth mouse scrolling | Skipped | Needs global event taps that rewrite input; fragile and invasive |
@@ -202,3 +202,21 @@ summarise, list what's left.
   Original scope: Redesign each island page in
   Stitchy's own design language (Home, Music, Timers, Weather, Shelf, Notes, Calendar,
   Tools, Launcher, Activity).
+
+## Extensions (visual extension creator)
+
+User-made island tabs built without code. Source in `Stitchy/Features/Extensions/`.
+
+| Stage | Status | Notes |
+|---|---|---|
+| 1. Foundation | Done | `ExtensionModel` (pure data, `formatVersion` 2), `ExtensionStore` (Application Support `extensions.json`, migration hook, unreadable file set aside), Keychain tokens (`ExtensionSecrets`). |
+| 2. Data | Done | GET + JSON only. HTTPS required (http for localhost). 15 s timeout, 2 MB limit, ephemeral session, no cookies. Auth: bearer, API key header or query. 429 Retry-After and exponential backoff. Disk cache. Field discovery with nested objects and arrays. Disabled extensions never poll. |
+| 3. Editor | Done | Window per extension: component library (click or drag), Layers (drag to reorder or move into containers), live preview at island width, inspector for metadata, data source (Test Connection, field tree, Bind / +), component data, layout, typography, colours, spacing, borders, size, hidden. |
+| 4. Runtime | Done | Island "Extensions" tab, shown only when one is enabled. Switcher for several, last-updated time, error badge, manual refresh. Settings › Extensions lists, creates, edits, duplicates, enables and deletes. |
+| 5. Automation | Done | Editor ⚡ tab: WHEN data refreshes, IF all/any conditions (is, is not, contains, above, below, true, false, exists, missing, changes), THEN island alert or alert + notification with `{field}` templates. Edge-triggered, cooldown, first data after launch is only a baseline, max 10 per extension. Alerts only: no links or actions. |
+| 6. Sharing | Done | `.stitchyext` JSON via Settings › Extensions (Export… / Import…). Export drops Keychain tokens, sensitive header/query values and URL credentials. Import: 1 MB and 500-component limits, version check, new IDs, arrives disabled with automations off. |
+
+More APIs: an extension can fetch up to 12 extra APIs after the first. Their query values and URL path segments may use `{path}` (with `|hour` / `|date`) from earlier responses; bindings reach them as `$name.field`. Extras never receive the Keychain token, and the scheme and host are always fixed, so one API's data can't pick the next request's host.
+
+Feeds and composition (added for multi-source dashboards): responses can be RSS/Atom/XML (attributes `@name`, text `#text`, HTML reduced to text with `#image`); paths take fallbacks `a ?? b`; `{@now|date-7}` / `|unix-N` dates in queries; `{path}` values in extra-API URL paths (single safe segment, host fixed); lists merge several arrays (`Label = path, …`, item label in `@source`), sort newest first and drop duplicates; any component can open an https link on click; bound fields with no value hide; text line limits; relative dates. 
+Security rules: no code execution of any kind, buttons and images accept https only, secrets never enter the model file, logs or exports.

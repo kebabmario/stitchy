@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import Observation
 import SwiftUI
 
 enum IslandTab: String, CaseIterable, Identifiable, Sendable {
-    case home, music, timer, weather, shelf, notes, calendar, tools, launcher, activity
+    case home, music, timer, weather, shelf, notes, calendar, tools, launcher, activity, extensions
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
         case .tools: "Tools"
         case .launcher: "Launcher"
         case .activity: "Activity"
+        case .extensions: "Extensions"
         }
     }
 
@@ -34,6 +36,7 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
         case .tools: "wrench.and.screwdriver.fill"
         case .launcher: "magnifyingglass"
         case .activity: "bell.fill"
+        case .extensions: "puzzlepiece.extension.fill"
         }
     }
 
@@ -50,6 +53,7 @@ enum IslandTab: String, CaseIterable, Identifiable, Sendable {
         case .tools: 196
         case .launcher: 176
         case .activity: 188
+        case .extensions: 190
         }
     }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// Notes page: Apple Notes first; legacy notes saved by earlier Stitchy

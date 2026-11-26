@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// Apple Notes in the island: list, search, folders, preview/edit, create,

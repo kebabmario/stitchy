@@ -1,4 +1,5 @@
 #!/bin/zsh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds Stitchy.app from the Swift package without needing the Xcode IDE.
 #   Scripts/build-app.sh            -> build/Stitchy.app (release, arm64)
 #   Scripts/build-app.sh --install  -> also copies it to ~/Applications

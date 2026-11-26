@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// Timers page: a "New timer" well, running timers, stopwatch and Focus.

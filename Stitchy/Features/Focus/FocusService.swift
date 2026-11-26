@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import Intents
 import Observation
@@ -54,36 +55,48 @@ final class FocusService {
         guard !name.isEmpty else { return }
         lastError = nil
         let ok = await Self.runShortcut(name)
-        if !ok { lastError = "The Shortcut “\(name)” didn't run." }
-        try? await Task.sleep(for: .milliseconds(600))
-        refresh()
-        if access != .authorized, ok { isFocused = on }   // best effort without read access
+        guard ok else { lastError = "The Shortcut “\(name)” didn't run."; return }
+        // Show it right away; macOS reports the new Focus state to apps a few seconds late,
+        // so an immediate re-read would show the old state and the island wouldn't update.
+        isFocused = on
+        try? await Task.sleep(for: .seconds(3))
+        if access == .authorized, let real = INFocusStatusCenter.default.focusStatus.isFocused { isFocused = real }
     }
 
     nonisolated static let installedOnName = "Stitchy Focus On"
     nonisolated static let installedOffName = "Stitchy Focus Off"
 
-    /// The moon button. Uses the configured or detected Shortcut pair; with
-    /// none in the library, creates Stitchy's own pair and opens it in
-    /// Shortcuts (the user clicks "Add Shortcut"). Returns false when the
-    /// user still has to add them.
-    func toggleFocus() async -> Bool {
-        let names = await Self.listShortcuts()
-        let library = Set(names)
-        if !(library.contains(settings.focusOnShortcut) && library.contains(settings.focusOffShortcut)) {
-            settings.focusOnShortcut = ""
-            settings.focusOffShortcut = ""
-            if let pair = Self.focusPair(in: names) {
-                settings.focusOnShortcut = pair.on
-                settings.focusOffShortcut = pair.off
-            }
+    /// The moon button: Do Not Disturb via macOS's own keyboard shortcut (see DNDHotkey).
+    /// Returns a message to show when something is needed, or nil when it toggled.
+    func toggleDoNotDisturb() async -> String? {
+        if !DNDHotkey.isAssigned {
+            guard await Self.confirmAssign() else { return "Do Not Disturb needs its keyboard shortcut. Click the moon again to set it up." }
+            guard DNDHotkey.assign() else { return "Couldn't assign the keyboard shortcut." }
+            try? await Task.sleep(for: .milliseconds(400))   // let macOS pick up the new shortcut
         }
-        guard canSwitch else {
-            lastError = await Self.installShortcuts() ? nil : "Couldn't create the Focus Shortcuts."
-            return false
+        guard AXIsProcessTrusted() else {
+            _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)   // kAXTrustedCheckOptionPrompt
+            return "Allow Stitchy in Privacy & Security › Accessibility, then click the moon again."
         }
-        await setFocus(isFocused != true)
-        return true
+        DNDHotkey.press()
+        let on = isFocused != true
+        isFocused = on
+        // macOS reports the new state to apps a few seconds late; sync when we can read it.
+        try? await Task.sleep(for: .seconds(3))
+        refresh()
+        if access != .authorized { isFocused = on }
+        return nil
+    }
+
+    /// One-time consent before changing a system keyboard setting.
+    private static func confirmAssign() async -> Bool {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = "Turn on Do Not Disturb with one click?"
+        alert.informativeText = "macOS doesn't let apps switch Do Not Disturb directly. Stitchy can assign \(DNDHotkey.display) to macOS's built-in \"Turn Do Not Disturb On/Off\" keyboard shortcut (System Settings › Keyboard › Keyboard Shortcuts) and press it for you. You can change or remove it there at any time."
+        alert.addButton(withTitle: "Assign \(DNDHotkey.display)")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Writes, signs and opens Do Not Disturb on/off Shortcuts. Shortcuts

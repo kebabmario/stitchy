@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import IOBluetooth
 import Observation
 import SwiftUI

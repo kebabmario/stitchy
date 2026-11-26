@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// The expanded island: a tab header and one feature page.
 struct ExpandedIslandView: View {
     @Environment(IslandModel.self) private var model
     @Environment(AppSettings.self) private var settings
+    @Environment(ExtensionStore.self) private var extensions
 
     var body: some View {
         let geometry = model.geometry
@@ -35,6 +37,7 @@ struct ExpandedIslandView: View {
             case .notes: settings.notesEnabled
             case .launcher: settings.launcherEnabled
             case .tools: settings.toolsEnabled
+            case .extensions: extensions.extensions.contains(where: \.enabled)
             }
         }
     }
@@ -64,6 +67,7 @@ struct ExpandedIslandView: View {
         case .launcher: LauncherView()
         case .tools: ToolsView()
         case .activity: ActivityView()
+        case .extensions: ExtensionsTabView()
         }
     }
 }

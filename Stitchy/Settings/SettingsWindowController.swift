@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import SwiftUI
 
@@ -28,6 +29,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         page("Clipboard", "doc.on.clipboard", height: 520, ClipboardSettingsView())
         page("Launcher", "magnifyingglass", height: 460, LauncherSettingsView())
         page("Privacy", "hand.raised", height: 560, PrivacySettingsView())
+        page("Extensions", "puzzlepiece.extension", height: 520, ExtensionsSettingsView())
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]

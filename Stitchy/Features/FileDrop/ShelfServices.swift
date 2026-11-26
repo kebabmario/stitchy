@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
 /// Finder › right-click › Services (Quick Actions) › "Add to Stitchy Shelf".

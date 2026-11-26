@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// Home: time, next event, every live activity, battery and network.
@@ -184,9 +185,8 @@ struct ControlToggles: View {
             toggle("moon.fill", on: focus.isFocused == true, tint: .indigo,
                    help: focus.isFocused == true ? "Turn Do Not Disturb off" : "Turn Do Not Disturb on") {
                 Task {
-                    let switched = await focus.toggleFocus()
-                    // First use: Shortcuts is showing Stitchy's two Focus Shortcuts to add.
-                    withAnimation { focusNote = switched ? focus.lastError : (focus.lastError ?? "In Shortcuts, click “Add Shortcut” on both, then tap the moon again.") }
+                    let message = await focus.toggleDoNotDisturb()
+                    withAnimation { focusNote = message }
                 }
             }
             if AppVolumeMixer.isSupported {

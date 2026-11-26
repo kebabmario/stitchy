@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import SwiftUI
 
 /// Lightweight Markdown for notes: headings, bullets, quotes, code blocks,

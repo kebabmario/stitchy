@@ -18,6 +18,8 @@
 	<string>Stitchy</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Stitchy contributors. Licensed under GPL-3.0-or-later.</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.3.0</string>
 	<key>CFBundleVersion</key>

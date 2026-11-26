@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 import Observation
 import ServiceManagement
@@ -137,6 +138,7 @@ extension View {
             .environment(s.privateLock).environment(s.gate).environment(s.appleNotes)
             .environment(s.bluetooth).environment(s.drives).environment(s.controls).environment(s.lyrics)
             .environment(s.weather).environment(s.focus).environment(s.mirror).environment(s.queue).environment(s.mixer).environment(s.capture).environment(s.agents).environment(s.dictation)
+            .environment(s.extensions).environment(s.extensionData)
     }
 }
 

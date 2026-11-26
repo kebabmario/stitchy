@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
 // Stitchy is an agent app (LSUIElement): no Dock icon, no main menu. The
