@@ -32,6 +32,9 @@ See [Building](docs/BUILDING.md) and [Architecture](docs/ARCHITECTURE.md).
   `Scripts/test.sh` before sending changes.
 - **Files.** New source files start with `// SPDX-License-Identifier: GPL-3.0-or-later`.
 - **Docs.** Update the relevant page in `docs/` and the changelog.
+- **CI.** Every pull request runs the tests and builds the app on GitHub Actions
+  (`.github/workflows/ci.yml`); it must pass before merging. See
+  [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Reporting bugs
 

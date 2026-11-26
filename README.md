@@ -35,15 +35,25 @@ Swift 6, SwiftUI and AppKit. No third-party dependencies and no web views.
 
 ## Install
 
-Stitchy isn't notarized yet, so build it yourself:
+Needs macOS 14 Sonoma or later on Apple silicon.
+
+- **Stable:** download the DMG from [Releases](https://github.com/kebabmario/stitchy/releases).
+- **Nightly:** development builds of `main` are attached to runs of the
+  [Nightly workflow](https://github.com/kebabmario/stitchy/actions/workflows/nightly.yml)
+  for 14 days (sign in to GitHub to download).
+
+Builds are **not signed with an Apple Developer ID or notarized**, so macOS blocks
+them the first time: open Stitchy from System Settings › Privacy & Security ›
+**Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Stitchy.app`.
+
+Or build it yourself (Xcode 26 or matching Command Line Tools):
 
 ```bash
-git clone <this repository> stitchy && cd stitchy
+git clone https://github.com/kebabmario/stitchy.git && cd stitchy
 Scripts/build-app.sh --install
 ```
 
-Needs macOS 14 Sonoma or later and the Swift 6 toolchain (Xcode 16+ or the Command
-Line Tools). See [Building](docs/BUILDING.md) for signing, tests and debugging.
+See [Building](docs/BUILDING.md) and [CI, nightly builds and releases](docs/RELEASING.md).
 
 ## Using it
 
@@ -64,6 +74,7 @@ Line Tools). See [Building](docs/BUILDING.md) for signing, tests and debugging.
 | [Extensions](docs/EXTENSIONS.md) | Building extensions: data sources, components, automations, sharing, file format |
 | [Privacy & permissions](docs/PRIVACY.md) | Every permission, every network service, what's stored where |
 | [Building](docs/BUILDING.md) | Build, sign, test, regenerate the icon, debug |
+| [CI and releases](docs/RELEASING.md) | CI, nightly builds, DMGs, releases, signing setup |
 | [Architecture](docs/ARCHITECTURE.md) | How the code is organised and why |
 | [Testing](docs/TESTING.md) | What's covered by tests and what was verified by hand |
 | [Roadmap](docs/ROADMAP.md) | Feature audit and phase history |

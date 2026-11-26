@@ -3,3 +3,10 @@ build/
 .swiftpm/
 *.xcodeproj/xcuserdata/
 .DS_Store
+*.dmg
+# Never commit signing material or credentials
+*.p12
+*.p8
+*.cer
+*.provisionprofile
+.env

@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: Scripts/ci/select-xcode.sh
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      # Stitchy has no third-party packages; this only checks the manifest resolves.
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Run tests
+        run: Scripts/test.sh
+
+      - name: Build Stitchy.app
+        run: Scripts/build-app.sh
+
+      - name: Check the app bundle
+        run: |
+          test -x build/Stitchy.app/Contents/MacOS/Stitchy
+          codesign --verify --strict --verbose=2 build/Stitchy.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Stitchy.app/Contents/Info.plist

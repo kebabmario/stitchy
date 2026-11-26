@@ -5,6 +5,10 @@ All notable changes to Stitchy. Dates are in UTC.
 ## Unreleased
 
 ### Added
+- **CI/CD:** GitHub Actions for tests and builds on every push and pull request, nightly
+  development DMGs as Actions artifacts, and tag-driven releases with DMG, SHA-256 and
+  generated notes. Builds are unsigned; Developer ID signing and notarization are ready
+  to enable with secrets. `Scripts/make-dmg.sh` packages DMGs locally.
 - **Extensions:** a visual, no-code creator for your own island tabs.
   - Data from JSON APIs and RSS/Atom/XML feeds, up to 12 extra APIs per extension
     that can use values from earlier responses (`$name` bindings, `{path}` in query

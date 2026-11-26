@@ -3,7 +3,7 @@
 ## Requirements
 
 - macOS 14 Sonoma or later (developed and tested on macOS 26.5, Apple silicon)
-- Swift 6 toolchain: Xcode 16+ or just the Command Line Tools (`xcode-select --install`)
+- Swift 6 toolchain with the macOS 26 SDK: Xcode 26 or matching Command Line Tools (`xcode-select --install`)
 
 ## Build and run
 
@@ -38,6 +38,15 @@ freshly signed build can take a few seconds while macOS verifies it.
 STITCHY_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" Scripts/build-app.sh --install
 ```
 
+
+## DMG
+
+```bash
+Scripts/make-dmg.sh             # build/dist/Stitchy-<version>-arm64.dmg and .sha256
+```
+
+See [CI, nightly builds and releases](RELEASING.md) for the options, CI, nightly
+builds and publishing releases.
 
 ## App icon
 

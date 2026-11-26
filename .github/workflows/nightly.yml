@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Development builds of main, as GitHub Actions artifacts (never a GitHub Release).
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if main hasn't changed since the last successful nightly
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  BRANCH: main
+
+jobs:
+  check:
+    name: Find new commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.find.outputs.sha }}
+      build: ${{ steps.find.outputs.build }}
+    steps:
+      - name: Compare main with the last successful nightly
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$REPO/commits/$BRANCH" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected commit id: $sha"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT" == "workflow_dispatch" && "$FORCE" == "true" ]]; then
+            echo "Manual run with force: building $sha"
+            echo "build=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          built="$(gh api "repos/$REPO/actions/workflows/nightly.yml/runs?status=success&branch=$BRANCH&per_page=50" \
+            --jq "[.workflow_runs[] | select(.id != $RUN_ID) | .head_sha] | index(\"$sha\") != null")"
+          if [[ "$built" == "true" ]]; then
+            echo "::notice::No new commits on $BRANCH since the last successful nightly ($sha). Skipping."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commit on $BRANCH: $sha"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build nightly DMG
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out ${{ needs.check.outputs.sha }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: Scripts/ci/select-xcode.sh
+
+      - name: Version
+        id: version
+        env:
+          SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          set -euo pipefail
+          base="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Stitchy/Resources/Info.plist)"
+          date="$(date -u +%Y%m%d)"
+          version="${base}-nightly.${date}+${SHA:0:7}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "file_version=${version//+/-}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: $version"
+
+      - name: Run tests
+        run: Scripts/test.sh
+
+      - name: Build Stitchy.app (unsigned development build)
+        env:
+          STITCHY_BUILD_VERSION: ${{ steps.version.outputs.version }}
+          STITCHY_BUILD_CHANNEL: development
+          STITCHY_BUILD_COMMIT: ${{ needs.check.outputs.sha }}
+        run: Scripts/build-app.sh
+
+      - name: Package DMG
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: Scripts/make-dmg.sh --version "$VERSION" --out build/dist
+
+      - name: Build metadata
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ needs.check.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          jq -n --arg version "$VERSION" --arg commit "$SHA" --arg branch "$BRANCH" \
+                --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$RUN_URL" \
+                --arg xcode "$(xcodebuild -version | head -1)" --arg macos "$(sw_vers -productVersion)" \
+                '{channel: "development", stable: false, signed: false, notarized: false, version: $version,
+                  commit: $commit, branch: $branch, built_at: $built_at, workflow_run: $run,
+                  xcode: $xcode, build_macos: $macos, minimum_macos: "14.0", architecture: "arm64"}' \
+                > build/dist/build-info.json
+          cat build/dist/build-info.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Stitchy-nightly-${{ steps.version.outputs.file_version }}
+          path: |
+            build/dist/Stitchy-${{ steps.version.outputs.file_version }}-arm64.dmg
+            build/dist/Stitchy-${{ steps.version.outputs.file_version }}-arm64.dmg.sha256
+            build/dist/build-info.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0   # DMG is already compressed
